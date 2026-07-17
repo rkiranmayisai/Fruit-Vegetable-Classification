@@ -1,14 +1,18 @@
 // AGROSCAN - API Client Module with Client-side Offline Fallbacks
 
 const IS_GITHUB_PAGES = window.location.hostname.includes("github.io");
-const API_BASE = IS_GITHUB_PAGES ? "" : window.location.origin;
+const IS_FILE_PROTOCOL = window.location.protocol === "file:";
+const API_BASE = (IS_GITHUB_PAGES || IS_FILE_PROTOCOL) ? "" : window.location.origin;
 
 // Helper to resolve samples path dynamically
 const getSamplesPrefix = () => {
     if (IS_GITHUB_PAGES) {
         return window.location.pathname.includes("/frontend/") ? "../samples" : "samples";
     }
-    return "/samples";
+    if (IS_FILE_PROTOCOL) {
+        return "samples";
+    }
+    return "samples";
 };
 
 // Embedded metadata and classification databases
@@ -243,7 +247,7 @@ const API = {
      * Fetch the list of available demo sample images
      */
     async getSamples() {
-        if (IS_GITHUB_PAGES) {
+        if (IS_GITHUB_PAGES || IS_FILE_PROTOCOL) {
             const titles = {
                 "fresh_apple.jpg": "Fresh Red Apple (Grade A)",
                 "spotted_banana.jpg": "Spotted Banana (Grade B - Semi-Fresh/Overripe)",
@@ -281,7 +285,7 @@ const API = {
      * Send an image file to the backend for OpenCV classification analysis
      */
     async analyzeFile(file) {
-        if (IS_GITHUB_PAGES) {
+        if (IS_GITHUB_PAGES || IS_FILE_PROTOCOL) {
             return this.analyzeBase64("", file.name);
         }
 
@@ -309,7 +313,7 @@ const API = {
      * Send a base64 encoded image string (e.g. from camera) to the backend
      */
     async analyzeBase64(base64Data, filename = "webcam_capture.jpg") {
-        if (IS_GITHUB_PAGES || !base64Data) {
+        if (IS_GITHUB_PAGES || IS_FILE_PROTOCOL || !base64Data) {
             return new Promise((resolve) => {
                 setTimeout(() => {
                     let results;
@@ -375,7 +379,7 @@ const API = {
     },
 
     getSampleImageUrl(filename) {
-        if (IS_GITHUB_PAGES) {
+        if (IS_GITHUB_PAGES || IS_FILE_PROTOCOL || API_BASE === "null" || !API_BASE) {
             return `${getSamplesPrefix()}/${filename}`;
         }
         return `${API_BASE}/samples/${filename}`;

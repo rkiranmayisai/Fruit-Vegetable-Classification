@@ -35,8 +35,18 @@ class AgroscanVoiceAssistant {
 
         this.recognition.onerror = (event) => {
             console.error("Speech Recognition Error:", event.error);
-            this.logToConsole(`Error: ${event.error}`, "system");
-            this.updateMicUI(false, "Voice Assistant Idle");
+            let errMsg = "Speech Recognition Error";
+            if (event.error === 'not-allowed') {
+                errMsg = "Mic Blocked: Grant microphone access / run on localhost or HTTPS";
+            } else if (event.error === 'no-speech') {
+                errMsg = "No speech detected. Try speaking again.";
+            } else if (event.error === 'audio-capture') {
+                errMsg = "Microphone not found.";
+            } else {
+                errMsg = `Voice Error: ${event.error}`;
+            }
+            this.logToConsole(errMsg, "system");
+            this.updateMicUI(false, errMsg);
         };
 
         this.recognition.onend = () => {
@@ -114,6 +124,27 @@ class AgroscanVoiceAssistant {
         
         if (!window.App) {
             this.speak("Application state is not initialized.");
+            return;
+        }
+
+        // Project Info & Advantages Commands
+        const isProjectQuery = command.includes('project') && (
+            command.includes('explain') || command.includes('about') || command.includes('what') || 
+            command.includes('tell') || command.includes('info') || command.includes('detail') || 
+            command.includes('desc') || command.includes('work')
+        );
+
+        const isAdvantageQuery = command.includes('advantage') || command.includes('benefit') || 
+                                 command.includes('why') || command.includes('value') || 
+                                 command.includes('pro') || command.includes('usefulness') || 
+                                 command.includes('good') || command.includes('help');
+
+        if (isProjectQuery) {
+            this.speak("AgroScan AI is an advanced fruit and vegetable classification platform. It uses deep learning models to identify produce, determine freshness, classify quality grades, assess disease infections, and estimate shelf life. It also provides storage recommendations, recipes, and features a smart digital inventory ledger.");
+            return;
+        }
+        if (isAdvantageQuery) {
+            this.speak("Key advantages of AgroScan AI include: automated quality grading and sorting of agricultural produce, real-time freshness detection to minimize food waste, automated disease scanning to prevent crop infection spread, seamless inventory ledger synchronization, and custom storage and recipe recommendations to optimize food utilization.");
             return;
         }
 

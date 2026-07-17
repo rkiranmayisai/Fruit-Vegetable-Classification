@@ -1,1027 +1,2019 @@
-// AGROSCAN - Core SPA Application Controller
+/* ==========================================================================
+   AuraDigit Application Logic - Pointer Events, Segmentation, Math & UI
+   ========================================================================== */
 
-const state = {
-    currentView: 'dashboard',
-    inputMode: 'upload',
-    activeObjects: [],
-    selectedObjIdx: 0,
-    inventory: [],
-    stats: {
-        totalScans: 0,
-        avgFreshness: 0,
-        gradeAPct: 0,
-        alerts: 0
-    },
-    adviceTab: 'action',
-    loadedImage: null,
-    webcamStream: null
-};
+// Global state variables
+let currentMode = 'canvas'; // 'canvas', 'webcam', 'upload'
+let activeTab = 'workspace';
+let undoStack = [];
+let redoStack = []; // Redo buffer
+let drawingData = [];
+let isDrawing = false;
+let webcamStream = null;
+let webcamInterval = null;
+let currentProfile = { name: "Guest Student", role: "Right-Handed" };
+let profiles = [];
+let predictionHistory = [];
+let correctedPool = { images: [], labels: [] }; // Adaptive retraining pool
+let lastPreprocessedPixels = null; // Last primary segment pixels for saving to history
 
-/* ── Toast notifications ─────────────────────────────── */
-function showToast(type, title, msg, durationMs = 3500) {
-    let container = document.getElementById('toast-container');
-    if (!container) {
-        container = document.createElement('div');
-        container.id = 'toast-container';
-        document.body.appendChild(container);
-    }
-    const icons = { success: '✅', warning: '⚠️', error: '❌', info: 'ℹ️' };
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.innerHTML = `
-        <span class="toast-icon">${icons[type] || 'ℹ️'}</span>
-        <div class="toast-body">
-            <div class="toast-title">${title}</div>
-            ${msg ? `<div class="toast-msg">${msg}</div>` : ''}
-        </div>`;
-    container.appendChild(toast);
-    setTimeout(() => {
-        toast.classList.add('hiding');
-        setTimeout(() => toast.remove(), 350);
-    }, durationMs);
-}
+// DOM Elements
+const sidebarButtons = document.querySelectorAll('.nav-menu .nav-btn');
+const tabPanes = document.querySelectorAll('.tab-pane');
+const subTabBtns = document.querySelectorAll('.sub-tab-btn');
+const subPanes = document.querySelectorAll('.sub-pane');
 
-/* ── Loading overlay on canvas area ─────────────────── */
-function showCanvasLoader(message = 'Analyzing…') {
-    const wrapper = document.querySelector('.visualizer-canvas-wrapper');
-    if (!wrapper) return;
-    let ov = wrapper.querySelector('.analysis-loading-overlay');
-    if (!ov) {
-        ov = document.createElement('div');
-        ov.className = 'analysis-loading-overlay';
-        ov.innerHTML = `<div class="spinner-ring"></div><div class="loading-label">${message}</div>`;
-        wrapper.appendChild(ov);
-    }
-    ov.style.display = 'flex';
-}
+// Canvas Elements
+const canvas = document.getElementById('drawing-canvas');
+const ctx = canvas.getContext('2d');
+const brushSizeInput = document.getElementById('brush-size');
+const brushSizeVal = document.getElementById('brush-size-val');
+const gridOverlay = document.getElementById('grid-overlay');
 
-function hideCanvasLoader() {
-    const ov = document.querySelector('.analysis-loading-overlay');
-    if (ov) ov.style.display = 'none';
-}
+// UI Controls
+const themeToggleBtn = document.getElementById('theme-toggle-btn');
+const profileWidget = document.querySelector('.profile-widget');
+const profileDropdownMenu = document.getElementById('profile-dropdown-menu');
+const profileListContainer = document.getElementById('profile-list');
+const createProfileBtn = document.getElementById('create-profile-btn');
+const profileModal = document.getElementById('profile-modal');
+const modalCancelBtn = document.getElementById('modal-cancel-btn');
+const modalSubmitBtn = document.getElementById('modal-submit-btn');
 
-/* ── Scanning line on canvas ─────────────────────────── */
-function showScanLine() {
-    const wrapper = document.querySelector('.visualizer-canvas-wrapper');
-    if (!wrapper) return;
-    let line = wrapper.querySelector('.scan-line-overlay');
-    if (!line) {
-        line = document.createElement('div');
-        line.className = 'scan-line-overlay';
-        wrapper.appendChild(line);
-    }
-    line.style.display = 'block';
-    setTimeout(() => { line.style.display = 'none'; }, 2200);
-}
+// Workspace Outputs
+const predictedDigit = document.getElementById('predicted-digit');
+const predictionConfidence = document.getElementById('prediction-confidence');
+const confidenceBar = document.getElementById('confidence-bar');
+const inferenceLatency = document.getElementById('inference-latency');
+const heatmapOverlayToggle = document.getElementById('heatmap-overlay-toggle');
+const mathModeToggle = document.getElementById('math-mode-toggle');
+const segmentsContainer = document.getElementById('segments-container');
+const mathResultPanel = document.getElementById('math-result-panel');
+const mathExprText = document.getElementById('math-expr-text');
+const mathSolvedVal = document.getElementById('math-solved-val');
 
+// Preprocessing Viewports
+const preprocessedCanvas = document.getElementById('preprocessed-canvas');
+const saliencyCanvas = document.getElementById('saliency-canvas');
 
-// Initialize Application on Window Load
-window.addEventListener("DOMContentLoaded", () => {
-    initApp();
+// Coach Elements
+const coachGaugeFill = document.getElementById('coach-gauge-fill');
+const coachScoreText = document.getElementById('coach-score-text');
+const coachRatingLabel = document.getElementById('coach-rating-label');
+const coachFeedbackBox = document.getElementById('coach-feedback-box');
+
+// Stats and Retraining Elements
+const retrainSampleCount = document.getElementById('retrain-sample-count');
+const retrainSampleBar = document.getElementById('retrain-sample-bar');
+const startRetrainBtn = document.getElementById('start-retrain-btn');
+
+// Charts references
+let distributionChart = null;
+let trendChart = null;
+let trainingLossChart = null;
+let trainingLossData = [];
+let trainingEpochLabels = [];
+
+/* ==========================================================================
+   1. Tab & Mode Switching Navigation
+   ========================================================================== */
+sidebarButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+        sidebarButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        const tabName = btn.getAttribute('data-tab');
+        activeTab = tabName;
+        
+        tabPanes.forEach(pane => pane.classList.remove('active'));
+        document.getElementById(`pane-${tabName}`).classList.add('active');
+        
+        // Update top bar headers
+        const headers = {
+            'workspace': { title: 'Inference Lab', sub: 'Draw, upload, or use real-time camera recognition' },
+            'coach': { title: 'Handwriting Coach', sub: 'Receive real-time clarity feedback and writing suggestions' },
+            'analytics': { title: 'Analytics Dashboard', sub: 'Track your performance history and digit distribution' },
+            'model-hub': { title: 'Model Retraining', sub: 'Tune parameters and train the neural network in-browser' },
+            'help-guide': { title: 'Architecture Guide', sub: 'Explore structural components, preprocessing pipelines, and code logic' }
+        };
+        
+        document.getElementById('current-tab-title').textContent = headers[tabName].title;
+        document.getElementById('current-tab-subtitle').textContent = headers[tabName].sub;
+
+        // Special initialization on tabs switch
+        if (tabName === 'analytics') {
+            initAnalyticsCharts();
+            renderHistoryTable();
+        } else if (tabName === 'model-hub') {
+            initTrainingChart();
+            updateRetrainingUI();
+        } else if (tabName === 'coach') {
+            updateCoachProfile();
+        }
+
+        // Manage webcam stream depending on active tab
+        if (tabName !== 'workspace' || currentMode !== 'webcam') {
+            stopWebcamStream();
+        }
+    });
 });
 
-function initApp() {
-    // 1. Fetch and render demo samples
-    loadDemoSamples();
-
-    // 2. Setup Drag and Drop
-    setupDragAndDrop();
-
-    // 3. Setup File Input
-    const fileInput = document.getElementById("file-input");
-    const dropZone = document.getElementById("drop-zone");
-    if (dropZone && fileInput) {
-        dropZone.addEventListener("click", () => fileInput.click());
-        fileInput.addEventListener("change", (e) => {
-            if (e.target.files.length > 0) {
-                processImageFile(e.target.files[0]);
-            }
-        });
-    }
-
-    // 4. Setup Microphones listeners
-    const btnMic = document.getElementById("btn-microphone");
-    if (btnMic) {
-        btnMic.addEventListener("click", () => {
-            if (window.VoiceAssistant) {
-                window.VoiceAssistant.toggle();
-            }
-        });
-    }
-
-    // 5. Setup Canvas Click Listeners (Interactive selection)
-    const canvas = document.getElementById("analysis-canvas");
-    if (canvas) {
-        canvas.addEventListener("click", handleCanvasClick);
-    }
-
-    // Mount state on window so VoiceAssistant can query it
-    window.App = {
-        getActiveObject: () => state.activeObjects[state.selectedObjIdx] || null,
-        switchView: switchView,
-        triggerAnalysis: () => {
-            if (state.inputMode === 'webcam') {
-                captureWebcamFrame();
-            }
-        }
-    };
-}
-
-// ==========================================
-// VIEW ROUTING & INPUT MODES
-// ==========================================
-
-function switchView(viewName) {
-    state.currentView = viewName;
-
-    // Toggle views active class
-    document.querySelectorAll(".content-view").forEach(view => {
-        view.classList.remove("active");
-    });
-    const targetView = document.getElementById(`view-view-${viewName}`) || document.getElementById(`view-${viewName}`);
-    if (targetView) targetView.classList.add("active");
-
-    // Toggle sidebar item active class
-    document.querySelectorAll(".menu-item").forEach(btn => {
-        btn.classList.remove("active");
-    });
-    const targetTab = document.getElementById(`tab-${viewName}`);
-    if (targetTab) targetTab.classList.add("active");
-
-    // Stop webcam if leaving dashboard
-    if (viewName !== 'dashboard') {
-        stopWebcam();
-    }
-}
-
-function switchInputMode(mode) {
-    state.inputMode = mode;
-    
-    // Toggle active tab buttons
-    document.getElementById("btn-tab-upload").classList.toggle("active", mode === 'upload');
-    document.getElementById("btn-tab-webcam").classList.toggle("active", mode === 'webcam');
-    
-    // Toggle containers
-    document.getElementById("input-upload-container").classList.toggle("active", mode === 'upload');
-    document.getElementById("input-webcam-container").classList.toggle("active", mode === 'webcam');
-
-    if (mode === 'upload') {
-        stopWebcam();
-    }
-}
-
-// ==========================================
-// DEMO SAMPLES LOADING
-// ==========================================
-
-async function loadDemoSamples() {
-    const container = document.getElementById("samples-list-container");
-    if (!container) return;
-
-    try {
-        const samples = await API.getSamples();
-        container.innerHTML = "";
-
-        if (samples.length === 0) {
-            container.innerHTML = "<div class='demo-sample-loading'>No demo samples found. Make sure run.py generated them.</div>";
-            return;
-        }
-
-        samples.forEach(sample => {
-            const card = document.createElement("div");
-            card.className = "sample-thumbnail-card";
-            card.onclick = () => loadSampleByName(sample.filename);
-
-            const img = document.createElement("img");
-            img.src = sample.url;
-            img.className = "sample-thumb-img";
-            img.alt = sample.title;
-
-            const title = document.createElement("div");
-            title.className = "sample-thumb-title";
-            title.innerText = sample.title;
-
-            card.appendChild(img);
-            card.appendChild(title);
-            container.appendChild(card);
-        });
-    } catch (e) {
-        container.innerHTML = "<div class='demo-sample-loading' style='color: var(--accent-red);'>Error loading samples from backend.</div>";
-    }
-}
-
-async function loadSampleByName(filename) {
-    // Show spinner/loading in visualizer status
-    setVisualizerStatus("Analyzing...", "blue");
-    
-    const sampleUrl = API.getSampleImageUrl(filename);
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = async () => {
-        state.loadedImage = img;
-        hideCanvasPlaceholder();
+subTabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        subTabBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
         
-        try {
-            // Trigger API analysis with filename parameter for golden demo mapping
-            const data = await API.analyzeBase64("", filename);
-            
-            processAnalysisResults(data.objects);
-            setVisualizerStatus("Analysis Complete", "green");
-            
-            // Voice assistant greeting
-            if (window.VoiceAssistant) {
-                const count = data.objects.length;
-                window.VoiceAssistant.speak(`Detected ${count} item${count > 1 ? 's' : ''}. First item is a ${data.objects[0].freshness} ${data.objects[0].label}.`);
+        const mode = btn.getAttribute('data-mode');
+        currentMode = mode;
+        
+        subPanes.forEach(pane => pane.classList.remove('active'));
+        document.getElementById(`sub-pane-${mode}`).classList.add('active');
+        
+        stopWebcamStream();
+        
+        if (mode === 'webcam') {
+            // Placeholder shown until user explicitly grants access
+            document.querySelector('.webcam-placeholder').style.display = 'flex';
+        }
+    });
+});
+
+/* ==========================================================================
+   2. Canvas Drawing Implementation
+   ========================================================================== */
+function initCanvas() {
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#ffffff'; // White stroke
+    ctx.fillStyle = '#000000';   // Black background
+    clearCanvas();
+    
+    // Pointer event listeners (supports mouse and touch)
+    canvas.addEventListener('pointerdown', startDrawing);
+    canvas.addEventListener('pointermove', draw);
+    canvas.addEventListener('pointerup', stopDrawing);
+    canvas.addEventListener('pointerleave', stopDrawing);
+    
+    // Undo support
+    saveCanvasState();
+    
+    // Setup controls
+    document.getElementById('canvas-clear-btn').addEventListener('click', () => {
+        clearCanvas();
+        clearPredictionsUI();
+        redoStack = []; // Clear redo stack on clear
+        undoStack = [];
+        saveCanvasState();
+    });
+    
+    document.getElementById('canvas-undo-btn').addEventListener('click', undoDrawing);
+    document.getElementById('canvas-redo-btn').addEventListener('click', redoDrawing);
+    document.getElementById('canvas-center-btn').addEventListener('click', centerDrawingVisually);
+    
+    // Grid Toggle
+    const gridToggleBtn = document.getElementById('grid-toggle-btn');
+    gridToggleBtn.addEventListener('click', () => {
+        gridOverlay.classList.toggle('show');
+        gridToggleBtn.classList.toggle('active');
+    });
+
+    // Brush Size range
+    brushSizeInput.addEventListener('input', (e) => {
+        const val = e.target.value;
+        brushSizeVal.textContent = `${val}px`;
+    });
+}
+
+function clearCanvas() {
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function startDrawing(e) {
+    isDrawing = true;
+    redoStack = []; // Clear redo stack on new action
+    ctx.beginPath();
+    // Get mouse coordinates relative to canvas
+    const rect = canvas.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * canvas.width;
+    const y = ((e.clientY - rect.top) / rect.height) * canvas.height;
+    ctx.moveTo(x, y);
+    ctx.lineWidth = brushSizeInput.value;
+    
+    // Prevent default touch gestures scrolling page
+    if (e.pointerType === 'touch') e.preventDefault();
+}
+
+function draw(e) {
+    if (!isDrawing) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * canvas.width;
+    const y = ((e.clientY - rect.top) / rect.height) * canvas.height;
+    
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    
+    if (e.pointerType === 'touch') e.preventDefault();
+}
+
+function stopDrawing() {
+    if (!isDrawing) return;
+    isDrawing = false;
+    ctx.closePath();
+    
+    saveCanvasState();
+    // Trigger inference dynamically
+    runSegmentationAndInference();
+}
+
+function saveCanvasState() {
+    // Keep stack depth to 15
+    if (undoStack.length >= 15) {
+        undoStack.shift();
+    }
+    undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+}
+
+function undoDrawing() {
+    if (undoStack.length > 1) {
+        const currentState = undoStack.pop();
+        redoStack.push(currentState); // Push to redo stack
+        const prevState = undoStack[undoStack.length - 1];
+        ctx.putImageData(prevState, 0, 0);
+        runSegmentationAndInference();
+    } else if (undoStack.length === 1) {
+        const currentState = undoStack.pop();
+        redoStack.push(currentState);
+        clearCanvas();
+        clearPredictionsUI();
+    }
+}
+
+function redoDrawing() {
+    if (redoStack.length > 0) {
+        const nextState = redoStack.pop();
+        undoStack.push(nextState);
+        ctx.putImageData(nextState, 0, 0);
+        runSegmentationAndInference();
+    }
+}
+
+// Bounding box sweep for drawn elements
+function getDrawnBoundingBox() {
+    const w = canvas.width;
+    const h = canvas.height;
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+
+    let minX = w, maxX = 0, minY = h, maxY = 0;
+    let hasPixels = false;
+
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const idx = (y * w + x) * 4;
+            const val = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+            if (val > 15) { // threshold active pixels
+                hasPixels = true;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
             }
-        } catch (e) {
-            console.error(e);
-            setVisualizerStatus("Analysis Error", "red");
         }
+    }
+
+    if (!hasPixels) return null;
+    
+    return {
+        x: Math.max(0, minX - 10),
+        y: Math.max(0, minY - 10),
+        w: Math.min(w - minX + 20, w),
+        h: Math.min(h - minY + 20, h)
     };
-    img.src = sampleUrl;
 }
 
-// ==========================================
-// DRAG & DROP + UPLOADS
-// ==========================================
+// Visual auto-centering of canvas content
+function centerDrawingVisually() {
+    const bbox = getDrawnBoundingBox();
+    if (!bbox) return;
 
-function setupDragAndDrop() {
-    const dropZone = document.getElementById("drop-zone");
-    if (!dropZone) return;
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.fillStyle = '#000000';
+    tempCtx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw cropped box centered on temp canvas
+    const drawX = (canvas.width - bbox.w) / 2;
+    const drawY = (canvas.height - bbox.h) / 2;
+    tempCtx.drawImage(canvas, bbox.x, bbox.y, bbox.w, bbox.h, drawX, drawY, bbox.w, bbox.h);
 
-    ['dragenter', 'dragover'].forEach(eventName => {
-        dropZone.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            dropZone.classList.add('dragover');
-        }, false);
-    });
+    // Copy back to main canvas
+    ctx.drawImage(tempCanvas, 0, 0);
+    saveCanvasState();
+    runSegmentationAndInference();
+}
 
-    ['dragleave', 'drop'].forEach(eventName => {
-        dropZone.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('dragover');
-        }, false);
-    });
+/* ==========================================================================
+   3. Multi-Digit Segmentation & Heuristic Parser
+   ========================================================================== */
+function segmentCanvasStrips() {
+    const w = canvas.width;
+    const h = canvas.height;
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
 
-    dropZone.addEventListener('drop', (e) => {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-        if (files.length > 0) {
-            processImageFile(files[0]);
+    // 1. Calculate horizontal column occupancy
+    const colActive = new Array(w).fill(false);
+    const threshold = 15;
+    for (let x = 0; x < w; x++) {
+        for (let y = 0; y < h; y++) {
+            const idx = (y * w + x) * 4;
+            const val = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+            if (val > threshold) {
+                colActive[x] = true;
+                break;
+            }
         }
-    });
+    }
+
+    // 2. Identify active segments/strips separated by blank space
+    const strips = [];
+    let inStrip = false;
+    let startX = 0;
+    
+    for (let x = 0; x < w; x++) {
+        if (colActive[x] && !inStrip) {
+            inStrip = true;
+            startX = x;
+        } else if (!colActive[x] && inStrip) {
+            inStrip = false;
+            // Filter out noise elements (less than 4px wide)
+            if (x - startX > 4) {
+                strips.push({ startX, endX: x });
+            }
+        }
+    }
+    if (inStrip) {
+        strips.push({ startX, endX: w });
+    }
+
+    // 3. Find vertical top-bottom bounds for each strip
+    const bboxes = [];
+    for (const strip of strips) {
+        let minY = h;
+        let maxY = 0;
+        let active = false;
+        
+        for (let y = 0; y < h; y++) {
+            for (let x = strip.startX; x < strip.endX; x++) {
+                const idx = (y * w + x) * 4;
+                const val = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+                if (val > threshold) {
+                    active = true;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+        
+        if (active) {
+            const pad = 12; // visual pad
+            const bx = Math.max(0, strip.startX - pad);
+            const by = Math.max(0, minY - pad);
+            const bw = Math.min(w - bx, (strip.endX - strip.startX) + 2 * pad);
+            const bh = Math.min(h - by, (maxY - minY) + 2 * pad);
+            bboxes.push({ x: bx, y: by, w: bw, h: bh });
+        }
+    }
+    
+    return bboxes;
 }
 
-function processImageFile(file) {
-    if (!file.type.startsWith('image/')) {
-        alert("Please upload an image file (PNG/JPG).");
+// Advanced custom heuristic classifier for operators
+function evaluateOperatorHeuristic(bbox, canvasData) {
+    const w = bbox.w;
+    const h = bbox.h;
+    const aspect = w / h;
+    
+    // 1. Minus Heuristic: extremely wide and flat aspect
+    if (aspect > 1.8 && h < 45) {
+        return '-';
+    }
+    
+    // Helper to scan coordinates relative to bounding box
+    const threshold = 15;
+    let cornersCount = 0;
+    let crossCount = 0;
+    let centerCount = 0;
+    let totalActive = 0;
+
+    for (let dy = 0; dy < h; dy++) {
+        for (let dx = 0; dx < w; dx++) {
+            const idx = ((bbox.y + dy) * canvas.width + (bbox.x + dx)) * 4;
+            const val = (canvasData[idx] + canvasData[idx+1] + canvasData[idx+2]) / 3;
+            
+            if (val > threshold) {
+                totalActive++;
+                const gridX = Math.floor((dx / w) * 3);
+                const gridY = Math.floor((dy / h) * 3);
+                
+                // Corner cells of 3x3 grid
+                if ((gridX === 0 || gridX === 2) && (gridY === 0 || gridY === 2)) {
+                    cornersCount++;
+                } else if (gridX === 1 && gridY === 1) {
+                    centerCount++;
+                } else {
+                    crossCount++;
+                }
+            }
+        }
+    }
+
+    if (totalActive === 0) return null;
+
+    // 2. Plus Heuristic: Aspect ratio near 1.0, high density center & cross lines, empty corners
+    const densityRatio = cornersCount / totalActive;
+    if (aspect >= 0.7 && aspect <= 1.4) {
+        if (densityRatio < 0.15 && crossCount > cornersCount * 2.2) {
+            return '+';
+        }
+        
+        // 3. Multiplication: high corners, high center intersection, empty cross elements
+        if (densityRatio > 0.4 && cornersCount > crossCount * 0.9 && centerCount > 0) {
+            return '*';
+        }
+    }
+
+    // 4. Division stroke: /
+    if (aspect >= 0.3 && aspect <= 0.9) {
+        // Evaluate if pixels are concentrated along the diagonal
+        let diagCount = 0;
+        for (let dy = 0; dy < h; dy++) {
+            // Expected diagonal x coordinate (bottom-left to top-right)
+            const targetDx = Math.round(w - (dy / h) * w);
+            for (let dx = Math.max(0, targetDx - 3); dx <= Math.min(w - 1, targetDx + 3); dx++) {
+                const idx = ((bbox.y + dy) * canvas.width + (bbox.x + dx)) * 4;
+                const val = (canvasData[idx] + canvasData[idx+1] + canvasData[idx+2]) / 3;
+                if (val > threshold) diagCount++;
+            }
+        }
+        if (diagCount > totalActive * 0.55 && aspect < 0.7) {
+            return '/';
+        }
+    }
+
+    return null; // Probable digit, fallback to neural net
+}
+
+/* ==========================================================================
+   4. Core Inference, Heatmap & Coach Pipeline
+   ========================================================================== */
+async function runSegmentationAndInference() {
+    if (!isModelLoaded) return;
+
+    const bboxes = segmentCanvasStrips();
+    
+    if (bboxes.length === 0) {
+        clearPredictionsUI();
         return;
     }
 
-    setVisualizerStatus("Analyzing...", "blue");
+    const canvasData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const mathMode = mathModeToggle.checked;
+    
+    segmentsContainer.innerHTML = ''; // Clear segments UI
+    
+    let expressionParts = [];
+    let processedImages = [];
+    let mainResult = null;
+    let totalLatency = 0;
+    
+    // We process each segment
+    for (let i = 0; i < bboxes.length; i++) {
+        const bbox = bboxes[i];
+        
+        // Render Segment canvas thumbnail
+        const segCanvas = document.createElement('canvas');
+        segCanvas.width = 28;
+        segCanvas.height = 28;
+        const segCtx = segCanvas.getContext('2d');
+        
+        // Run preprocessing to get Float32 array size 784
+        const preprocessedPixels = preprocessSegment(canvas, bbox);
+        processedImages.push(preprocessedPixels);
+
+        // Render processed pixels onto the thumbnail canvas
+        const imgData28 = segCtx.createImageData(28, 28);
+        for (let j = 0; j < 784; j++) {
+            const val = Math.round(preprocessedPixels[j] * 255);
+            const idx = j * 4;
+            imgData28.data[idx] = val;
+            imgData28.data[idx+1] = val;
+            imgData28.data[idx+2] = val;
+            imgData28.data[idx+3] = 255;
+        }
+        segCtx.putImageData(imgData28, 0, 0);
+
+        // Determine identity
+        let symbol = null;
+        let confidence = 1.0;
+        let isOp = false;
+
+        if (mathMode) {
+            symbol = evaluateOperatorHeuristic(bbox, canvasData);
+            if (symbol) isOp = true;
+        }
+
+        // If not operator, invoke TF.js prediction
+        if (!symbol) {
+            const predResults = await predictDigit(preprocessedPixels);
+            symbol = predResults.prediction.toString();
+            confidence = predResults.confidence;
+            totalLatency += predResults.latency;
+        }
+
+        expressionParts.push({ symbol, confidence, isOp, pixels: preprocessedPixels });
+
+        // Add segment item in horizontal strip list
+        const segItem = document.createElement('div');
+        segItem.className = 'segment-item';
+        
+        // Select dropdown for Manual Correction / Labeling
+        const select = document.createElement('select');
+        const options = ['0','1','2','3','4','5','6','7','8','9','+','-','*','/'];
+        options.forEach(opt => {
+            const el = document.createElement('option');
+            el.value = opt;
+            el.textContent = opt;
+            if (opt === symbol) el.selected = true;
+            select.appendChild(el);
+        });
+
+        // Event listener for manual label override (Adaptive learning training trigger)
+        select.addEventListener('change', (e) => {
+            const newVal = e.target.value;
+            const oldVal = expressionParts[i].symbol;
+            expressionParts[i].symbol = newVal;
+            
+            // If user corrections occur, add to retraining pool
+            const isNewValDigit = !isNaN(parseInt(newVal));
+            if (isNewValDigit && newVal !== oldVal) {
+                correctedPool.images.push(preprocessedPixels);
+                correctedPool.labels.push(parseInt(newVal));
+                
+                // Add system log notifications
+                updateRetrainingUI();
+                console.log(`Log added to Retraining pool: true class ${newVal}`);
+            }
+            
+            recalculateExpression(expressionParts);
+        });
+
+        segItem.appendChild(segCanvas);
+        segItem.appendChild(select);
+        segmentsContainer.appendChild(segItem);
+    }
+
+    // Process first segment as primary single display output
+    const primarySegment = expressionParts[0];
+    if (primarySegment && !primarySegment.isOp) {
+        predictedDigit.textContent = primarySegment.symbol;
+        predictionConfidence.textContent = `${(primarySegment.confidence * 100).toFixed(1)}%`;
+        confidenceBar.style.width = `${primarySegment.confidence * 100}%`;
+        inferenceLatency.textContent = `${totalLatency}ms`;
+        
+        // Store pixels for history logging
+        lastPreprocessedPixels = primarySegment.pixels;
+        
+        // Generate preprocessed preview viewport
+        const pCtx = preprocessedCanvas.getContext('2d');
+        const imgData28 = pCtx.createImageData(28, 28);
+        for (let j = 0; j < 784; j++) {
+            const val = Math.round(primarySegment.pixels[j] * 255);
+            const idx = j * 4;
+            imgData28.data[idx] = val;
+            imgData28.data[idx+1] = val;
+            imgData28.data[idx+2] = val;
+            imgData28.data[idx+3] = 255;
+        }
+        pCtx.putImageData(imgData28, 0, 0);
+
+        // Generate XAI Saliency Heatmap
+        generateXAISaliency(primarySegment.pixels, parseInt(primarySegment.symbol));
+        
+        // Generate Coach feedback
+        evaluateHandwritingQuality(primarySegment.pixels, bboxes[0]);
+    } else if (primarySegment && primarySegment.isOp) {
+        predictedDigit.textContent = primarySegment.symbol;
+        predictionConfidence.textContent = '100%';
+        confidenceBar.style.width = '100%';
+        inferenceLatency.textContent = '0ms';
+    }
+
+    // Recalculate expression list
+    recalculateExpression(expressionParts);
+}
+
+function recalculateExpression(parts) {
+    const mathMode = mathModeToggle.checked;
+    const translationPanel = document.getElementById('text-translation-panel');
+    const translationVal = document.getElementById('text-translation-val');
+    
+    if (mathMode && parts.length > 0) {
+        mathResultPanel.style.display = 'flex';
+        
+        // Construct string equation
+        const equation = parts.map(p => p.symbol).join(' ');
+        mathExprText.textContent = equation;
+        
+        try {
+            // Secure basic math evaluator (only digit characters and operations allowed)
+            if (/^[0-9+\-*/\s().]+$/.test(equation)) {
+                // Replace * and / symbols if needed
+                const cleanEquation = equation.replace(/x/g, '*');
+                const result = Function(`"use strict"; return (${cleanEquation})`)();
+                
+                if (result !== undefined && !isNaN(result)) {
+                    const resStr = Number.isInteger(result) ? result.toString() : result.toFixed(2);
+                    mathSolvedVal.textContent = resStr;
+                    
+                    // Update digit to text
+                    const words = convertNumberToWords(resStr);
+                    translationVal.textContent = words;
+                    translationPanel.style.display = 'block';
+                } else {
+                    mathSolvedVal.textContent = '?';
+                    translationPanel.style.display = 'none';
+                }
+            } else {
+                mathSolvedVal.textContent = '?';
+                translationPanel.style.display = 'none';
+            }
+        } catch (e) {
+            mathSolvedVal.textContent = '?';
+            translationPanel.style.display = 'none';
+        }
+    } else {
+        mathResultPanel.style.display = 'none';
+        
+        // If not in math mode, translate the multi-digit number
+        if (parts.length > 0) {
+            const numStr = parts.map(p => p.symbol).join('');
+            if (/^[0-9]+$/.test(numStr)) {
+                const words = convertNumberToWords(numStr);
+                translationVal.textContent = words;
+                translationPanel.style.display = 'block';
+            } else {
+                translationPanel.style.display = 'none';
+            }
+        } else {
+            translationPanel.style.display = 'none';
+        }
+    }
+}
+
+// Get reference to the overlay heatmap canvas (separate from main drawing canvas)
+const heatmapCanvas = document.getElementById('heatmap-canvas');
+
+// Generate XAI Saliency overlay or side viewport
+function generateXAISaliency(pixels, winningClass) {
+    const saliencyValues = getSaliencyGradients(pixels, winningClass);
+    
+    const sCtx = saliencyCanvas.getContext('2d');
+    const sImgData = sCtx.createImageData(28, 28);
+    
+    for (let i = 0; i < 784; i++) {
+        const idx = i * 4;
+        const score = saliencyValues[i]; // Normalized 0-1
+        
+        // Heatmap color mapping: Black -> Orange -> White
+        // Red component: high response
+        sImgData.data[idx] = Math.round(score * 255);
+        // Green component: medium-high response
+        sImgData.data[idx+1] = Math.round(Math.pow(score, 2) * 160);
+        // Blue component: very low
+        sImgData.data[idx+2] = Math.round(Math.pow(score, 4) * 50);
+        // Alpha
+        sImgData.data[idx+3] = 255;
+    }
+    
+    sCtx.putImageData(sImgData, 0, 0);
+
+    // Apply overlay on the SEPARATE heatmap canvas (not the main drawing canvas)
+    if (heatmapOverlayToggle.checked) {
+        overlayHeatmapOnCanvas(saliencyValues);
+    } else {
+        // Clear the heatmap overlay canvas if toggle is off
+        const hmCtx = heatmapCanvas.getContext('2d');
+        hmCtx.clearRect(0, 0, heatmapCanvas.width, heatmapCanvas.height);
+    }
+}
+
+function overlayHeatmapOnCanvas(saliencyValues) {
+    // Render the saliency overlay on the dedicated heatmap canvas (not the main drawing canvas)
+    const hmCtx = heatmapCanvas.getContext('2d');
+    hmCtx.clearRect(0, 0, heatmapCanvas.width, heatmapCanvas.height);
+
+    // We scale the 28x28 saliency to 450x450
+    const scaleX = heatmapCanvas.width / 28;
+    const scaleY = heatmapCanvas.height / 28;
+
+    hmCtx.save();
+    for (let y = 0; y < 28; y++) {
+        for (let x = 0; x < 28; x++) {
+            const score = saliencyValues[y * 28 + x];
+            if (score > 0.1) {
+                // Color mapping: Glowing violet-pink overlay
+                hmCtx.fillStyle = `rgba(${Math.round(score * 236)}, ${Math.round(score * 72)}, 254, ${score * 0.55})`;
+                hmCtx.fillRect(x * scaleX, y * scaleY, scaleX, scaleY);
+            }
+        }
+    }
+    hmCtx.restore();
+}
+
+// Heatmap toggle event
+heatmapOverlayToggle.addEventListener('change', () => {
+    runSegmentationAndInference();
+});
+
+// Handwriting Coaching logic
+function evaluateHandwritingQuality(pixels, bbox) {
+    // Quality scoring elements
+    let centeringScore = 100;
+    let thicknessScore = 100;
+    let continuityScore = 100;
+    let contrastScore = 100;
+
+    // 1. Centering evaluation using center of mass
+    let sumX = 0, sumY = 0, count = 0;
+    let minPix = 1.0, maxPix = 0.0;
+    
+    for (let y = 0; y < 28; y++) {
+        for (let x = 0; x < 28; x++) {
+            const val = pixels[y * 28 + x];
+            if (val > maxPix) maxPix = val;
+            if (val < minPix) minPix = val;
+            if (val > 0.05) {
+                sumX += x;
+                sumY += y;
+                count++;
+            }
+        }
+    }
+
+    if (count > 0) {
+        const cx = sumX / count;
+        const cy = sumY / count;
+        const devX = Math.abs(14 - cx);
+        const devY = Math.abs(14 - cy);
+        const totalDev = devX + devY;
+        centeringScore = Math.max(0, Math.round(100 - totalDev * 8));
+    }
+
+    // 2. Stroke thickness (density of white pixels in bounding box)
+    const bboxArea = bbox.w * bbox.h;
+    let activePixels = 0;
+    const data = ctx.getImageData(bbox.x, bbox.y, bbox.w, bbox.h).data;
+    for (let i = 0; i < data.length; i += 4) {
+        if ((data[i] + data[i+1] + data[i+2]) / 3 > 15) activePixels++;
+    }
+
+    const density = activePixels / bboxArea;
+    if (density < 0.12) { // Too thin
+        thicknessScore = Math.max(20, Math.round(density * 800));
+    } else if (density > 0.35) { // Too thick
+        thicknessScore = Math.max(20, Math.round(100 - (density - 0.35) * 200));
+    }
+
+    // 3. Contrast evaluation (brightness of drawn strokes)
+    contrastScore = Math.round(maxPix * 100);
+
+    // 4. Bounding box size proportion
+    const sizeProportion = bbox.w / canvas.width;
+    if (sizeProportion < 0.08) {
+        continuityScore = 40; // Too small to identify features reliably
+    }
+
+    // Calculate final aggregate clarity score
+    const finalScore = Math.round((centeringScore + thicknessScore + contrastScore + continuityScore) / 4);
+
+    // Render gauge circle animation
+    // Circle circumference is 2 * PI * r = 2 * 3.14159 * 40 = 251.2
+    const strokeOffset = 251.2 - (finalScore / 100) * 251.2;
+    coachGaugeFill.style.strokeDashoffset = strokeOffset;
+    coachScoreText.textContent = `${finalScore}%`;
+
+    // Render bar meters in detailed tab
+    document.getElementById('coach-metric-centering').style.width = `${centeringScore}%`;
+    document.getElementById('coach-val-centering').textContent = `${centeringScore}%`;
+    document.getElementById('coach-metric-thickness').style.width = `${thicknessScore}%`;
+    document.getElementById('coach-val-thickness').textContent = `${thicknessScore}%`;
+    document.getElementById('coach-metric-contrast').style.width = `${contrastScore}%`;
+    document.getElementById('coach-val-contrast').textContent = `${contrastScore}%`;
+    document.getElementById('coach-metric-continuity').style.width = `${continuityScore}%`;
+    document.getElementById('coach-val-continuity').textContent = `${continuityScore}%`;
+
+    // Rating Label text feedback
+    let rating = "Fair stroke structure";
+    if (finalScore >= 90) rating = "Excellent stroke structure!";
+    else if (finalScore >= 75) rating = "Clear handwriting shape";
+    else if (finalScore < 50) rating = "Requires improvements";
+    
+    coachRatingLabel.textContent = rating;
+
+    // Compose suggestions panel text
+    let feedbackHTML = '<div class="coach-advice-box">';
+    
+    if (centeringScore < 75) {
+        feedbackHTML += `
+            <div class="advice-item warning">
+                <i class="fa-solid fa-align-center"></i>
+                <div>
+                    <strong>Stroke Translation Deviation</strong>
+                    <p>Your digit is written off-center. Centering digits increases classification accuracy by eliminating variance in the classification layers.</p>
+                </div>
+            </div>`;
+    } else {
+        feedbackHTML += `
+            <div class="advice-item success">
+                <i class="fa-solid fa-circle-check"></i>
+                <div>
+                    <strong>Well Centered</strong>
+                    <p>Excellent! The centroid is located near coordinate (14, 14), mapping perfectly to standard inputs.</p>
+                </div>
+            </div>`;
+    }
+
+    if (density < 0.12) {
+        feedbackHTML += `
+            <div class="advice-item warning">
+                <i class="fa-solid fa-paintbrush"></i>
+                <div>
+                    <strong>Brush Stroke Too Thin</strong>
+                    <p>The pixel weight is low. Try writing slower, applying higher pressure, or increasing the brush size slider to 28-32px.</p>
+                </div>
+            </div>`;
+    } else if (density > 0.35) {
+        feedbackHTML += `
+            <div class="advice-item warning">
+                <i class="fa-solid fa-fill-drip"></i>
+                <div>
+                    <strong>Stroke Blotting / Excess Thickness</strong>
+                    <p>Strokes are bleeding into each other. Try drawing with a smaller brush size to preserve the character's internal hollow loops (like in '0', '8', '6').</p>
+                </div>
+            </div>`;
+    } else {
+        feedbackHTML += `
+            <div class="advice-item success">
+                <i class="fa-solid fa-circle-check"></i>
+                <div>
+                    <strong>Ideal Stroke Density</strong>
+                    <p>Stroke weight matches standard MNIST line distributions, allowing optimal activation of pooling layers.</p>
+                </div>
+            </div>`;
+    }
+
+    if (sizeProportion < 0.08) {
+        feedbackHTML += `
+            <div class="advice-item warning">
+                <i class="fa-solid fa-minimize"></i>
+                <div>
+                    <strong>Micro-writing Detected</strong>
+                    <p>The character is too small. Small strokes lose spatial resolution during scaling down to 28x28, leading to pixelation errors. Write larger.</p>
+                </div>
+            </div>`;
+    }
+
+    feedbackHTML += '</div>';
+    coachFeedbackBox.innerHTML = feedbackHTML;
+}
+
+function clearPredictionsUI() {
+    predictedDigit.textContent = '-';
+    predictionConfidence.textContent = '0.0%';
+    confidenceBar.style.width = '0%';
+    inferenceLatency.textContent = '0ms';
+    lastPreprocessedPixels = null;
+    
+    // Clear crop/XAI canvases
+    const pCtx = preprocessedCanvas.getContext('2d');
+    pCtx.clearRect(0,0,28,28);
+    const sCtx = saliencyCanvas.getContext('2d');
+    sCtx.clearRect(0,0,28,28);
+    
+    // Clear heatmap overlay canvas
+    const hmCtx = heatmapCanvas.getContext('2d');
+    hmCtx.clearRect(0, 0, heatmapCanvas.width, heatmapCanvas.height);
+    
+    segmentsContainer.innerHTML = '<div class="placeholder-text">Draw multiple items separated by spaces to trigger segmentation.</div>';
+    mathResultPanel.style.display = 'none';
+    
+    // Reset coach gauge
+    coachGaugeFill.style.strokeDashoffset = 251.2;
+    coachScoreText.textContent = '0%';
+    coachRatingLabel.textContent = 'Draw a digit to begin coaching analysis';
+    coachFeedbackBox.innerHTML = `
+        <div class="coach-placeholder">
+            <i class="fa-solid fa-compass-drafting animate-float"></i>
+            <p>Draw any digit on the Canvas in the **Inference Lab** tab, then return here to receive professional feedback on your writing structure.</p>
+        </div>`;
+}
+
+/* ==========================================================================
+   5. Webcam Stream & Frame Capture
+   ========================================================================== */
+const startWebcamBtn = document.getElementById('start-webcam-btn');
+const toggleStreamBtn = document.getElementById('toggle-stream-btn');
+const webcamVideo = document.getElementById('webcam-video');
+
+startWebcamBtn.addEventListener('click', initWebcam);
+toggleStreamBtn.addEventListener('click', toggleWebcamInference);
+
+async function initWebcam() {
+    try {
+        webcamStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 320, height: 240, facingMode: 'user' },
+            audio: false
+        });
+        webcamVideo.srcObject = webcamStream;
+        document.querySelector('.webcam-placeholder').style.display = 'none';
+        toggleStreamBtn.disabled = false;
+        
+        // Start continuous processing
+        startWebcamInference();
+    } catch (e) {
+        console.error("Camera access error: ", e);
+        alert("Could not access webcam stream. Please verify browser media permissions.");
+    }
+}
+
+function startWebcamInference() {
+    toggleStreamBtn.innerHTML = '<i class="fa-solid fa-pause"></i> Pause Inference';
+    webcamInterval = setInterval(processWebcamFrame, 150); // Inference every 150ms
+}
+
+function stopWebcamStream() {
+    if (webcamInterval) {
+        clearInterval(webcamInterval);
+        webcamInterval = null;
+    }
+    if (webcamStream) {
+        webcamStream.getTracks().forEach(track => track.stop());
+        webcamStream = null;
+    }
+    toggleStreamBtn.disabled = true;
+    toggleStreamBtn.textContent = 'Pause Inference';
+}
+
+function toggleWebcamInference() {
+    if (webcamInterval) {
+        clearInterval(webcamInterval);
+        webcamInterval = null;
+        toggleStreamBtn.innerHTML = '<i class="fa-solid fa-play"></i> Resume Inference';
+    } else {
+        startWebcamInference();
+    }
+}
+
+function processWebcamFrame() {
+    if (!isModelLoaded || !webcamStream) return;
+
+    // Create a temporary canvas matching the crop box
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = 180;
+    tempCanvas.height = 180;
+    const tempCtx = tempCanvas.getContext('2d');
+
+    // Crop center square of video stream
+    // Video aspect is 4:3 (320x240) -> square starts at x=70, y=30, size=180
+    tempCtx.drawImage(webcamVideo, 70, 30, 180, 180, 0, 0, 180, 180);
+
+    // Apply high-contrast binarization threshold (webcam uses white background usually, so invert)
+    const imgData = tempCtx.getImageData(0, 0, 180, 180);
+    const data = imgData.data;
+    
+    // Invert webcam stream (convert black ink on white background to white stroke on black background)
+    const threshCanvas = document.createElement('canvas');
+    threshCanvas.width = 180;
+    threshCanvas.height = 180;
+    const tCtx = threshCanvas.getContext('2d');
+    const tImgData = tCtx.createImageData(180, 180);
+    
+    for (let i = 0; i < data.length; i += 4) {
+        const grayscale = (data[i] + data[i+1] + data[i+2]) / 3;
+        // Invert: if pixel is dark (ink), convert to bright white stroke.
+        const val = grayscale < 110 ? 255 : 0;
+        tImgData.data[i] = val;
+        tImgData.data[i+1] = val;
+        tImgData.data[i+2] = val;
+        tImgData.data[i+3] = 255;
+    }
+    tCtx.putImageData(tImgData, 0, 0);
+
+    // Feed binarized image to standard segmentation bounding boxes
+    const bbox = { x: 0, y: 0, w: 180, h: 180 }; // Treat entire frame as bounding box
+    const preprocessed = preprocessSegment(threshCanvas, bbox);
+    
+    predictDigit(preprocessed).then(results => {
+        predictedDigit.textContent = results.prediction;
+        predictionConfidence.textContent = `${(results.confidence * 100).toFixed(1)}%`;
+        confidenceBar.style.width = `${results.confidence * 100}%`;
+        inferenceLatency.textContent = `${results.latency}ms`;
+        lastPreprocessedPixels = preprocessed;
+
+        // Update preprocessed viewport preview
+        const pCtx = preprocessedCanvas.getContext('2d');
+        const imgData28 = pCtx.createImageData(28, 28);
+        for (let j = 0; j < 784; j++) {
+            const val = Math.round(preprocessed[j] * 255);
+            const idx = j * 4;
+            imgData28.data[idx] = val;
+            imgData28.data[idx+1] = val;
+            imgData28.data[idx+2] = val;
+            imgData28.data[idx+3] = 255;
+        }
+        pCtx.putImageData(imgData28, 0, 0);
+
+        generateXAISaliency(preprocessed, results.prediction);
+    });
+}
+
+/* ==========================================================================
+   6. Image Upload Processing
+   ========================================================================== */
+const uploadZone = document.getElementById('upload-zone');
+const fileInput = document.getElementById('file-input');
+const uploadPreview = document.getElementById('upload-preview');
+const uploadedImagePreview = document.getElementById('uploaded-image-preview');
+const resetUploadBtn = document.getElementById('reset-upload-btn');
+
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadZone.classList.add('dragover');
+});
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) processUploadedFile(files[0]);
+});
+
+fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) processUploadedFile(e.target.files[0]);
+});
+
+resetUploadBtn.addEventListener('click', () => {
+    uploadPreview.style.display = 'none';
+    uploadZone.style.display = 'flex';
+    fileInput.value = '';
+    clearPredictionsUI();
+});
+
+function processUploadedFile(file) {
+    if (!file.type.match('image.*')) {
+        alert("Error: Selected file is not a valid image format.");
+        return;
+    }
+    
     const reader = new FileReader();
     reader.onload = (e) => {
-        const img = new Image();
-        img.onload = async () => {
-            state.loadedImage = img;
-            hideCanvasPlaceholder();
-            
-            try {
-                const data = await API.analyzeFile(file);
-                processAnalysisResults(data.objects);
-                setVisualizerStatus("Analysis Complete", "green");
-            } catch (err) {
-                console.error(err);
-                setVisualizerStatus("Analysis Error", "red");
+        uploadedImagePreview.src = e.target.result;
+        uploadZone.style.display = 'none';
+        uploadPreview.style.display = 'flex';
+        
+        uploadedImagePreview.onload = () => {
+            // Draw image on canvas to run segmentations
+            clearCanvas();
+            // Calculate scale to fit canvas width/height
+            const aspect = uploadedImagePreview.naturalWidth / uploadedImagePreview.naturalHeight;
+            let dw = canvas.width;
+            let dh = canvas.height;
+            if (aspect > 1) {
+                dh = canvas.width / aspect;
+            } else {
+                dw = canvas.height * aspect;
             }
+            
+            // Draw binarized centered image
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0,0,canvas.width,canvas.height);
+            
+            // Draw original in middle
+            const dx = (canvas.width - dw) / 2;
+            const dy = (canvas.height - dh) / 2;
+            ctx.drawImage(uploadedImagePreview, dx, dy, dw, dh);
+
+            // Binarize drawing to ensure white text on black background
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const grayscale = (data[i] + data[i+1] + data[i+2]) / 3;
+                // If background is bright (white paper), invert, else preserve
+                // We threshold: if background is mostly bright, invert
+                // Standard heuristic check: average brightness of corners
+                const isLightBg = checkCornersBrightness(data, canvas.width, canvas.height);
+                const val = isLightBg ? (grayscale < 160 ? 255 : 0) : (grayscale > 45 ? 255 : 0);
+                data[i] = val;
+                data[i+1] = val;
+                data[i+2] = val;
+            }
+            ctx.putImageData(imgData, 0, 0);
+            saveCanvasState();
+            runSegmentationAndInference();
         };
-        img.src = e.target.result;
     };
     reader.readAsDataURL(file);
 }
 
-// ==========================================
-// WEBCAM INTERACTION
-// ==========================================
-
-async function toggleWebcam() {
-    const video = document.getElementById("webcam-video");
-    const toggleBtn = document.getElementById("btn-webcam-toggle");
-    const captureBtn = document.getElementById("btn-webcam-capture");
-    
-    if (state.webcamStream) {
-        stopWebcam();
-        toggleBtn.innerText = "Start Camera";
-        toggleBtn.className = "btn-primary";
-        captureBtn.disabled = true;
-    } else {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: "environment" } 
-            });
-            state.webcamStream = stream;
-            video.srcObject = stream;
-            toggleBtn.innerText = "Stop Camera";
-            toggleBtn.className = "btn-danger";
-            captureBtn.disabled = false;
-        } catch (e) {
-            alert("Could not access camera: " + e.message);
-        }
-    }
-}
-
-function stopWebcam() {
-    const video = document.getElementById("webcam-video");
-    const toggleBtn = document.getElementById("btn-webcam-toggle");
-    const captureBtn = document.getElementById("btn-webcam-capture");
-    
-    if (state.webcamStream) {
-        state.webcamStream.getTracks().forEach(track => track.stop());
-        state.webcamStream = null;
-    }
-    if (video) video.srcObject = null;
-    if (toggleBtn) {
-        toggleBtn.innerText = "Start Camera";
-        toggleBtn.className = "btn-primary";
-    }
-    if (captureBtn) captureBtn.disabled = true;
-}
-
-async function captureWebcamFrame() {
-    const video = document.getElementById("webcam-video");
-    const canvas = document.getElementById("webcam-capture-canvas");
-    if (!video || !canvas || !state.webcamStream) return;
-
-    setVisualizerStatus("Analyzing frame...", "blue");
-    const ctx = canvas.getContext("2d");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    const base64Data = canvas.toDataURL("image/jpeg", 0.9);
-    
-    // Set as active visualizer source
-    const img = new Image();
-    img.onload = async () => {
-        state.loadedImage = img;
-        hideCanvasPlaceholder();
-        
-        try {
-            const data = await API.analyzeBase64(base64Data);
-            processAnalysisResults(data.objects);
-            setVisualizerStatus("Webcam Scan Done", "green");
-        } catch (e) {
-            console.error(e);
-            setVisualizerStatus("Webcam Scan Error", "red");
-        }
-    };
-    img.src = base64Data;
-}
-
-// ==========================================
-// RESULTS PROCESSING & RENDER
-// ==========================================
-
-function processAnalysisResults(objects) {
-    state.activeObjects = objects;
-    state.selectedObjIdx = 0;
-    
-    // Increment stats counter
-    state.stats.totalScans += 1;
-    document.getElementById("stats-total-scans").innerText = state.stats.totalScans;
-    
-    if (objects.length > 0) {
-        // Redraw Canvas Overlay
-        drawCanvasOverlay();
-        
-        // Show detail components
-        document.getElementById("detected-items-selector-bar").style.display = "flex";
-        document.getElementById("analysis-details-container").style.display = "grid";
-        document.getElementById("quick-actions-bar").style.display = "flex";
-        
-        // Build badges row
-        buildObjectBadgeRow();
-        
-        // Update details panel
-        updateDetailPanels();
-        
-        // Recalculate rolling overall metrics
-        recalcGlobalStats();
-    } else {
-        alert("No produce detected. Try adjusting lighting or framing.");
-    }
-}
-
-function drawCanvasOverlay() {
-    const canvas = document.getElementById("analysis-canvas");
-    const img = state.loadedImage;
-    if (!canvas || !img) return;
-
-    const ctx = canvas.getContext("2d");
-    // Size canvas to fit image resolution
-    canvas.width = img.naturalWidth || img.width;
-    canvas.height = img.naturalHeight || img.height;
-
-    // Draw base image
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    // Draw bounding box for each object
-    state.activeObjects.forEach((obj, idx) => {
-        const [ymin, xmin, ymax, xmax] = obj.box;
-        const x = xmin * canvas.width;
-        const y = ymin * canvas.height;
-        const w = (xmax - xmin) * canvas.width;
-        const h = (ymax - ymin) * canvas.height;
-        
-        const isSelected = idx === state.selectedObjIdx;
-        
-        // Choose color based on freshness rating
-        let accentColor = "#00e676"; // Green
-        if (obj.freshness === "semi-fresh") accentColor = "#ffd600"; // Yellow
-        if (obj.freshness === "rotten") accentColor = "#ff1744"; // Red
-        
-        // Draw main bounding box outline
-        ctx.strokeStyle = accentColor;
-        ctx.lineWidth = isSelected ? 6 : 3;
-        ctx.setLineDash([]);
-        
-        // Rounded corners bounding box
-        drawRoundedRect(ctx, x, y, w, h, 8);
-
-        // Draw selection pulse/glow if active
-        if (isSelected) {
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-            ctx.lineWidth = 2;
-            drawRoundedRect(ctx, x - 4, y - 4, w + 8, h + 8, 12);
-            
-            // Draw corners accent bars
-            ctx.strokeStyle = accentColor;
-            ctx.lineWidth = 8;
-            ctx.beginPath();
-            // Top Left corner
-            ctx.moveTo(x - 2, y + 20); ctx.lineTo(x - 2, y - 2); ctx.lineTo(x + 20, y - 2);
-            // Top Right
-            ctx.moveTo(x + w + 2, y + 20); ctx.lineTo(x + w + 2, y - 2); ctx.lineTo(x + w - 20, y - 2);
-            // Bottom Left
-            ctx.moveTo(x - 2, y + h - 20); ctx.lineTo(x - 2, y + h + 2); ctx.lineTo(x + 20, y + h + 2);
-            // Bottom Right
-            ctx.moveTo(x + w + 2, y + h - 20); ctx.lineTo(x + w + 2, y + h + 2); ctx.lineTo(x + w - 20, y + h + 2);
-            ctx.stroke();
-        }
-
-        // Draw label pill above box
-        ctx.fillStyle = accentColor;
-        const labelStr = `${obj.label} (${Math.round(obj.confidence*100)}%)`;
-        ctx.font = `bold ${isSelected ? 16 : 12}px sans-serif`;
-        const textWidth = ctx.measureText(labelStr).width;
-        
-        ctx.fillRect(x, y - (isSelected ? 26 : 20), textWidth + 12, isSelected ? 26 : 20);
-        
-        ctx.fillStyle = "#000";
-        ctx.fillText(labelStr, x + 6, y - (isSelected ? 8 : 5));
+function checkCornersBrightness(data, w, h) {
+    // Check pixel brightness at 4 corners
+    const idxs = [
+        0, // Top-left
+        (w - 1) * 4, // Top-right
+        ((h - 1) * w) * 4, // Bottom-left
+        ((h - 1) * w + (w - 1)) * 4 // Bottom-right
+    ];
+    let sum = 0;
+    idxs.forEach(idx => {
+        sum += (data[idx] + data[idx+1] + data[idx+2]) / 3;
     });
+    return (sum / 4 > 120); // If corner averages are bright, invert
 }
 
-function drawRoundedRect(ctx, x, y, width, height, radius) {
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + width - radius, y);
-    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-    ctx.lineTo(x + width, y + height - radius);
-    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-    ctx.lineTo(x + radius, y + height);
-    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-    ctx.lineTo(x, y + radius);
-    ctx.quadraticCurveTo(x, y, x + radius, y);
-    ctx.closePath();
-    ctx.stroke();
-}
+/* ==========================================================================
+   7. Prediction Log Dashboard History
+   ========================================================================== */
+const saveHistoryBtn = document.getElementById('save-history-btn');
+const exportCsvBtn = document.getElementById('export-csv-btn');
+const printReportBtn = document.getElementById('print-report-btn');
+const clearHistoryBtn = document.getElementById('clear-history-btn');
+const historyTableBody = document.getElementById('history-table-body');
 
-function handleCanvasClick(e) {
-    if (state.activeObjects.length === 0) return;
-    
-    const canvas = document.getElementById("analysis-canvas");
-    const rect = canvas.getBoundingClientRect();
-    
-    // Client click coordinates relative to canvas layout
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
-    
-    // Scale to original canvas resolution
-    const canvasX = (clickX / rect.width) * canvas.width;
-    const canvasY = (clickY / rect.height) * canvas.height;
-    
-    // Find if click falls in any object bounding box
-    let clickedIdx = -1;
-    let minArea = Infinity; // If nested boxes, choose smallest box (more specific)
-    
-    state.activeObjects.forEach((obj, idx) => {
-        const [ymin, xmin, ymax, xmax] = obj.box;
-        const x = xmin * canvas.width;
-        const y = ymin * canvas.height;
-        const w = (xmax - xmin) * canvas.width;
-        const h = (ymax - ymin) * canvas.height;
+saveHistoryBtn.addEventListener('click', logPredictionToHistory);
+exportCsvBtn.addEventListener('click', exportHistoryCSV);
+printReportBtn.addEventListener('click', () => window.print());
+clearHistoryBtn.addEventListener('click', resetPredictionHistory);
+
+function loadHistoryFromStorage() {
+    const data = localStorage.getItem('auradigit_history');
+    if (data && JSON.parse(data).length > 0) {
+        predictionHistory = JSON.parse(data);
+    } else {
+        // Pre-populate with mock predictions to show dashboard charts immediately on first load
+        const mockThumb = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' style='background:%23000;'><text x='15' y='28' fill='%23fff' font-family='Outfit' font-size='24'>D</text></svg>";
         
-        if (canvasX >= x && canvasX <= x+w && canvasY >= y && canvasY <= y+h) {
-            const area = w * h;
-            if (area < minArea) {
-                minArea = area;
-                clickedIdx = idx;
+        predictionHistory = [
+            {
+                id: "mock1",
+                timestamp: new Date(Date.now() - 30 * 1000).toLocaleString(),
+                imageBase64: mockThumb,
+                predictedLabel: "5",
+                confidence: 94.2,
+                clarityScore: 88,
+                trueLabel: "5",
+                profile: "Guest Student"
+            },
+            {
+                id: "mock2",
+                timestamp: new Date(Date.now() - 5 * 60 * 1000).toLocaleString(),
+                imageBase64: mockThumb,
+                predictedLabel: "3",
+                confidence: 91.5,
+                clarityScore: 82,
+                trueLabel: "3",
+                profile: "Guest Student"
+            },
+            {
+                id: "mock3",
+                timestamp: new Date(Date.now() - 15 * 60 * 1000).toLocaleString(),
+                imageBase64: mockThumb,
+                predictedLabel: "8",
+                confidence: 96.0,
+                clarityScore: 91,
+                trueLabel: "8",
+                profile: "Guest Student"
+            },
+            {
+                id: "mock4",
+                timestamp: new Date(Date.now() - 45 * 60 * 1000).toLocaleString(),
+                imageBase64: mockThumb,
+                predictedLabel: "2",
+                confidence: 88.5,
+                clarityScore: 79,
+                trueLabel: "2",
+                profile: "Guest Student"
+            },
+            {
+                id: "mock5",
+                timestamp: new Date(Date.now() - 2 * 3600 * 1000).toLocaleString(),
+                imageBase64: mockThumb,
+                predictedLabel: "0",
+                confidence: 98.1,
+                clarityScore: 94,
+                trueLabel: "0",
+                profile: "Guest Student"
             }
-        }
-    });
-    
-    if (clickedIdx !== -1 && clickedIdx !== state.selectedObjIdx) {
-        selectObject(clickedIdx);
+        ];
+        saveHistoryToStorage();
     }
 }
 
-function buildObjectBadgeRow() {
-    const container = document.getElementById("detected-badge-container");
-    if (!container) return;
-    container.innerHTML = "";
-
-    state.activeObjects.forEach((obj, idx) => {
-        const badge = document.createElement("div");
-        badge.className = `obj-select-badge ${idx === state.selectedObjIdx ? 'active' : ''}`;
-        badge.onclick = () => selectObject(idx);
-        
-        // Accent dot indicator
-        const dot = document.createElement("span");
-        dot.style.display = "inline-block";
-        dot.style.width = "8px";
-        dot.style.height = "8px";
-        dot.style.borderRadius = "50%";
-        
-        let color = "var(--accent-green)";
-        if (obj.freshness === "semi-fresh") color = "var(--accent-yellow)";
-        if (obj.freshness === "rotten") color = "var(--accent-red)";
-        dot.style.backgroundColor = color;
-        
-        const label = document.createElement("span");
-        label.innerText = obj.label;
-        
-        badge.appendChild(dot);
-        badge.appendChild(label);
-        container.appendChild(badge);
-    });
+function saveHistoryToStorage() {
+    localStorage.setItem('auradigit_history', JSON.stringify(predictionHistory));
 }
 
-function selectObject(idx) {
-    state.selectedObjIdx = idx;
-    drawCanvasOverlay();
-    buildObjectBadgeRow();
-    updateDetailPanels();
-}
-
-function updateDetailPanels() {
-    const obj = state.activeObjects[state.selectedObjIdx];
-    if (!obj) return;
-
-    // 1. Freshness gauge updates
-    const freshnessPct = Math.round(obj.freshness_confidence * 100);
-    const gaugePath = document.getElementById("freshness-gauge-path");
-    const gaugeText = document.getElementById("freshness-gauge-text");
-    
-    if (gaugePath && gaugeText) {
-        // Set gauge color class
-        gaugePath.className.baseVal = `circle ${obj.freshness === "fresh" ? 'green' : (obj.freshness === "semi-fresh" ? 'yellow' : 'red')}`;
-        // Set stroke percentage
-        gaugePath.setAttribute("stroke-dasharray", `${freshnessPct}, 100`);
-        gaugeText.textContent = `${freshnessPct}%`;
-    }
-
-    // 2. Ripeness & Grade Pills
-    const ripenessPill = document.getElementById("ripeness-state-pill");
-    const gradePill = document.getElementById("grade-state-pill");
-    if (ripenessPill) {
-        ripenessPill.innerText = obj.ripeness;
-        ripenessPill.className = `ripeness-value-pill ${obj.ripeness}`;
-    }
-    if (gradePill) {
-        gradePill.innerText = obj.grade;
-    }
-    
-    // Reason
-    const gradeReason = document.getElementById("grade-reason-text");
-    if (gradeReason) gradeReason.innerText = obj.grade_reason;
-
-    // 3. Nutrition panel updates
-    document.getElementById("produce-scientific-name").innerText = obj.scientific_name || "";
-    document.getElementById("weight-estimate-txt").innerText = obj.weight_est || "150g";
-    
-    // Nutrition bars filling
-    const nutrition = obj.nutrition;
-    
-    document.getElementById("nutri-val-calories").innerText = nutrition.calories;
-    document.getElementById("nutri-val-carbs").innerText = nutrition.carbs;
-    document.getElementById("nutri-val-fiber").innerText = nutrition.fiber;
-    document.getElementById("nutri-val-vitc").innerText = nutrition.vitamin_c;
-    document.getElementById("nutri-val-potassium").innerText = nutrition.potassium || "120mg";
-
-    // Progress bar width scaling
-    const parseVal = (str) => parseInt(str) || 0;
-    
-    document.getElementById("nutri-bar-calories").style.width = `${Math.min(100, parseVal(nutrition.calories) * 0.8)}%`;
-    document.getElementById("nutri-bar-carbs").style.width = `${Math.min(100, parseVal(nutrition.carbs) * 4)}%`;
-    document.getElementById("nutri-bar-fiber").style.width = `${Math.min(100, parseVal(nutrition.fiber) * 15)}%`;
-    document.getElementById("nutri-bar-vitc").style.width = `${Math.min(100, parseVal(nutrition.vitamin_c))}%`;
-    document.getElementById("nutri-bar-potassium").style.width = `${Math.min(100, parseVal(nutrition.potassium) * 0.25)}%`;
-
-    // 4. Disease Warning Card visibility
-    const diseaseCard = document.getElementById("disease-warning-card");
-    if (diseaseCard) {
-        if (obj.disease) {
-            diseaseCard.style.display = "block";
-            document.getElementById("disease-name").innerText = obj.disease.name;
-            document.getElementById("disease-pathogen").innerText = obj.disease.pathogen;
-            document.getElementById("disease-severity").innerText = `${obj.disease.severity} Severity`;
-            document.getElementById("disease-description").innerText = obj.disease.description;
-            document.getElementById("disease-prevention").innerText = obj.disease.prevention;
-        } else {
-            diseaseCard.style.display = "none";
-        }
-    }
-
-    // 5. Storage Advice Panel updates
-    document.getElementById("storage-advice-text").innerText = obj.storage_tips;
-    document.getElementById("recipe-advice-text").innerText = obj.recipe_advice;
-    document.getElementById("action-advice-text").innerText = obj.action_advice;
-
-    // Update Advice badge classes
-    const actionBadge = document.getElementById("action-indicator-badge");
-    if (actionBadge) {
-        actionBadge.innerText = obj.action_advice.split('.')[0];
-        actionBadge.className = `advice-pill-indicator ${obj.freshness === "fresh" ? 'green' : (obj.freshness === "semi-fresh" ? 'orange' : 'red')}`;
-    }
-}
-
-function switchAdviceTab(tabKey) {
-    state.adviceTab = tabKey;
-    
-    // Toggles button classes
-    document.getElementById("btn-adv-action").classList.toggle("active", tabKey === 'action');
-    document.getElementById("btn-adv-recipe").classList.toggle("active", tabKey === 'recipe');
-    document.getElementById("btn-adv-storage").classList.toggle("active", tabKey === 'storage');
-    
-    // Toggles panes
-    document.getElementById("pane-adv-action").classList.toggle("active", tabKey === 'action');
-    document.getElementById("pane-adv-recipe").classList.toggle("active", tabKey === 'recipe');
-    document.getElementById("pane-adv-storage").classList.toggle("active", tabKey === 'storage');
-}
-
-// Helpers
-function setVisualizerStatus(txt, colorClass) {
-    const badge = document.getElementById("visualizer-status");
-    if (!badge) return;
-    badge.innerText = txt;
-    badge.className = `badge ${colorClass}`;
-}
-
-function hideCanvasPlaceholder() {
-    const placeholder = document.getElementById("canvas-placeholder");
-    if (placeholder) placeholder.style.display = "none";
-}
-
-// ==========================================
-// ROLLING STATISTICS CALCULATIONS
-// ==========================================
-
-function recalcGlobalStats() {
-    if (state.inventory.length === 0) {
-        document.getElementById("stats-avg-freshness").innerText = "0%";
-        document.getElementById("stats-grade-a").innerText = "0%";
-        document.getElementById("stats-alerts").innerText = "0";
+function logPredictionToHistory() {
+    const digit = predictedDigit.textContent;
+    if (digit === '-') {
+        alert("Cannot log empty prediction. Draw a digit first.");
         return;
     }
 
-    let totalFreshPct = 0;
-    let gradeACount = 0;
-    let warningAlerts = 0;
+    const bbox = getDrawnBoundingBox();
+    if (!bbox) return;
 
-    state.inventory.forEach(item => {
-        totalFreshPct += item.freshness_val;
-        if (item.grade === "Grade A") gradeACount += 1;
-        if (item.freshness === "rotten" || item.has_disease) warningAlerts += 1;
-    });
+    // Crop drawn box from canvas to make history thumbnail
+    const thumbCanvas = document.createElement('canvas');
+    thumbCanvas.width = 40;
+    thumbCanvas.height = 40;
+    const thumbCtx = thumbCanvas.getContext('2d');
+    thumbCtx.fillStyle = '#000000';
+    thumbCtx.fillRect(0,0,40,40);
+    thumbCtx.drawImage(canvas, bbox.x, bbox.y, bbox.w, bbox.h, 4, 4, 32, 32);
 
-    const avgFresh = Math.round(totalFreshPct / state.inventory.length);
-    const gradeAPct = Math.round((gradeACount / state.inventory.length) * 100);
-
-    document.getElementById("stats-avg-freshness").innerText = `${avgFresh}%`;
-    document.getElementById("stats-grade-a").innerText = `${gradeAPct}%`;
-    document.getElementById("stats-alerts").innerText = warningAlerts;
-
-    // Glowing animations when warning updates
-    const alertCard = document.getElementById("stats-alerts").closest(".stat-card");
-    if (warningAlerts > 0) {
-        alertCard.style.borderColor = "var(--accent-red)";
-        alertCard.style.boxShadow = "0 0 15px rgba(255, 23, 68, 0.15)";
-    } else {
-        alertCard.style.borderColor = "var(--border-color)";
-        alertCard.style.boxShadow = "var(--shadow-main)";
-    }
-}
-
-// ==========================================
-// SMART INVENTORY MODULE & CSV EXPORT
-// ==========================================
-
-function addSelectedItemToInventory() {
-    const obj = state.activeObjects[state.selectedObjIdx];
-    if (!obj) return;
-
-    // Create unique batch identifier
-    const date = new Date();
-    const formattedDate = date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const shortUid = "B-" + Math.random().toString(36).substring(2, 7).toUpperCase();
-
-    // Map to inventory model
-    const item = {
-        uid: shortUid,
-        date: formattedDate,
-        name: obj.label,
-        freshness: obj.freshness,
-        freshness_val: Math.round(obj.freshness_confidence * 100),
-        grade: obj.grade,
-        weight: obj.weight_est,
-        shelf_life: obj.shelf_life_days,
-        has_disease: obj.disease ? true : false,
-        disease_name: obj.disease ? obj.disease.name : null,
-        scientific: obj.scientific_name
+    const logItem = {
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        imageBase64: thumbCanvas.toDataURL(),
+        predictedLabel: digit,
+        confidence: parseFloat(predictionConfidence.textContent),
+        clarityScore: parseInt(coachScoreText.textContent),
+        trueLabel: digit, // Defaults to predicted
+        profile: currentProfile.name,
+        // Store pixels so we can retrain if the user corrects the label later
+        pixels: lastPreprocessedPixels ? Array.from(lastPreprocessedPixels) : null
     };
 
-    state.inventory.push(item);
+    predictionHistory.unshift(logItem); // Add to top of list
+    saveHistoryToStorage();
+    
+    // Animate button success state
+    const originalHTML = saveHistoryBtn.innerHTML;
+    saveHistoryBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> Logged!';
+    saveHistoryBtn.classList.remove('btn-secondary');
+    saveHistoryBtn.classList.add('btn-primary');
+    setTimeout(() => {
+        saveHistoryBtn.innerHTML = originalHTML;
+        saveHistoryBtn.classList.remove('btn-primary');
+        saveHistoryBtn.classList.add('btn-secondary');
+    }, 1200);
 
-    // Redraw table
-    renderInventoryTable();
-
-    // Update global header stats
-    recalcGlobalStats();
-
-    // Auto visual confirmation
-    alert(`Logged ${obj.label} (${shortUid}) to Smart Inventory.`);
+    updateAnalyticsDashboard();
 }
 
-function renderInventoryTable() {
-    const tbody = document.getElementById("inventory-tbody");
-    if (!tbody) return;
+function renderHistoryTable() {
+    historyTableBody.innerHTML = '';
+    
+    // Filter history for current profile
+    const profileHistory = predictionHistory.filter(h => h.profile === currentProfile.name);
 
-    if (state.inventory.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-table-msg">Inventory is empty. Scan produce and click "Log to Smart Inventory" to track stock.</td></tr>`;
+    if (profileHistory.length === 0) {
+        historyTableBody.innerHTML = `
+            <tr>
+                <td colspan="7" class="empty-table-msg">No predictions logged yet for this profile.</td>
+            </tr>`;
         return;
     }
 
-    tbody.innerHTML = "";
-    state.inventory.forEach((item, idx) => {
-        const row = document.createElement("tr");
-
-        let freshBadgeColor = "good";
-        if (item.freshness === "semi-fresh") freshBadgeColor = "warning";
-        if (item.freshness === "rotten") freshBadgeColor = "danger";
-
-        let daysRemainingTag = "good";
-        if (item.shelf_life <= 3) daysRemainingTag = "warning";
-        if (item.shelf_life === 0) daysRemainingTag = "danger";
+    profileHistory.forEach(item => {
+        const row = document.createElement('tr');
+        
+        // True label correction dropdown
+        let labelDropdown = `<select class="history-label-correct" data-id="${item.id}">`;
+        for (let i = 0; i < 10; i++) {
+            const selected = item.trueLabel === i.toString() ? 'selected' : '';
+            labelDropdown += `<option value="${i}" ${selected}>${i}</option>`;
+        }
+        labelDropdown += `</select>`;
 
         row.innerHTML = `
-            <td><code>${item.uid}</code></td>
-            <td>${item.date}</td>
-            <td><strong>${item.name}</strong> ${item.has_disease ? `<span class="badge red" style="font-size: 9px; padding: 2px 4px;">${item.disease_name}</span>` : ""}</td>
-            <td><span class="shelf-life-tag ${freshBadgeColor}">${item.freshness} (${item.freshness_val}%)</span></td>
-            <td><span class="badge blue">${item.grade}</span></td>
-            <td>${item.weight}</td>
-            <td><span class="shelf-life-tag ${daysRemainingTag}">${item.shelf_life} days</span></td>
+            <td>${item.timestamp}</td>
+            <td><img src="${item.imageBase64}" alt="Thumb"></td>
+            <td><strong class="glow-text">${item.predictedLabel}</strong></td>
+            <td>${item.confidence.toFixed(1)}%</td>
+            <td>${item.clarityScore}%</td>
+            <td class="true-label-cell">${labelDropdown}</td>
             <td>
-                <button class="btn-accent" style="padding: 4px 8px; font-size: 11px;" onclick="viewItemQRCode(${idx})">🔍 QR Label</button>
-                <button class="btn-danger" style="padding: 4px 8px; font-size: 11px; margin-left: 5px;" onclick="deleteInventoryItem(${idx})">✕</button>
+                <button class="btn btn-danger btn-sm delete-log-btn" data-id="${item.id}">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
             </td>
         `;
 
-        tbody.appendChild(row);
+        // Bind correction event
+        row.querySelector('.history-label-correct').addEventListener('change', (e) => {
+            const newLabel = e.target.value;
+            correctLogLabel(item.id, newLabel);
+        });
+
+        // Bind delete event
+        row.querySelector('.delete-log-btn').addEventListener('click', () => {
+            deleteLogItem(item.id);
+        });
+
+        historyTableBody.appendChild(row);
     });
 }
 
-function deleteInventoryItem(idx) {
-    state.inventory.splice(idx, 1);
-    renderInventoryTable();
-    recalcGlobalStats();
-    closeQRDrawer();
-}
-
-function clearInventory() {
-    if (confirm("Are you sure you want to clear all inventory logs?")) {
-        state.inventory = [];
-        renderInventoryTable();
-        recalcGlobalStats();
-        closeQRDrawer();
+function correctLogLabel(id, newLabel) {
+    const idx = predictionHistory.findIndex(h => h.id === id);
+    if (idx !== -1) {
+        const oldLabel = predictionHistory[idx].trueLabel;
+        predictionHistory[idx].trueLabel = newLabel;
+        saveHistoryToStorage();
+        
+        if (newLabel !== oldLabel) {
+            // Rebuild the retraining pool from all history corrections
+            loadRetrainingPoolFromHistory();
+            updateAnalyticsDashboard();
+        }
     }
 }
 
-function filterInventoryTable() {
-    const query = document.getElementById("inventory-search").value.toLowerCase();
-    const freshnessFilter = document.getElementById("inventory-filter-freshness").value;
-
-    const rows = document.querySelectorAll("#inventory-tbody tr");
-    if (rows.length === 1 && rows[0].classList.contains("empty-table-msg")) return;
-
-    rows.forEach((row, idx) => {
-        const item = state.inventory[idx];
-        if (!item) return;
-
-        const matchesQuery = item.name.toLowerCase().includes(query) || item.uid.toLowerCase().includes(query);
-        const matchesFreshness = freshnessFilter === "" || item.freshness === freshnessFilter;
-
-        if (matchesQuery && matchesFreshness) {
-            row.style.display = "";
-        } else {
-            row.style.display = "none";
+// Scans the current profile's history and rebuilds the corrected retraining pool
+// from any entries where trueLabel differs from predictedLabel and pixels are stored
+function loadRetrainingPoolFromHistory() {
+    correctedPool.images = [];
+    correctedPool.labels = [];
+    
+    const profileHistory = predictionHistory.filter(h => h.profile === currentProfile.name);
+    profileHistory.forEach(h => {
+        const trueDigit = parseInt(h.trueLabel);
+        const predDigit = parseInt(h.predictedLabel);
+        // Only add corrected entries that have saved pixel arrays and are numeric
+        if (!isNaN(trueDigit) && !isNaN(predDigit) && trueDigit !== predDigit && h.pixels && h.pixels.length === 784) {
+            correctedPool.images.push(h.pixels);
+            correctedPool.labels.push(trueDigit);
         }
     });
+    
+    updateRetrainingUI();
 }
 
-function exportInventoryToCSV() {
-    if (state.inventory.length === 0) {
-        alert("Inventory is empty. Add items to log first.");
+function deleteLogItem(id) {
+    predictionHistory = predictionHistory.filter(h => h.id !== id);
+    saveHistoryToStorage();
+    loadRetrainingPoolFromHistory(); // Rebuild pool in case a corrected entry was deleted
+    renderHistoryTable();
+    updateAnalyticsDashboard();
+}
+
+function resetPredictionHistory() {
+    if (confirm("Are you sure you want to clear the entire history database for this profile?")) {
+        predictionHistory = predictionHistory.filter(h => h.profile !== currentProfile.name);
+        saveHistoryToStorage();
+        renderHistoryTable();
+        updateAnalyticsDashboard();
+    }
+}
+
+function updateAnalyticsDashboard() {
+    const profileHistory = predictionHistory.filter(h => h.profile === currentProfile.name);
+    
+    const totalCount = profileHistory.length;
+    let avgConfidence = 0;
+    let avgClarity = 0;
+    let errorCorrections = 0;
+
+    if (totalCount > 0) {
+        let sumConf = 0;
+        let sumClarity = 0;
+        profileHistory.forEach(h => {
+            sumConf += h.confidence;
+            sumClarity += h.clarityScore;
+            if (h.predictedLabel !== h.trueLabel) errorCorrections++;
+        });
+        avgConfidence = sumConf / totalCount;
+        avgClarity = sumClarity / totalCount;
+    }
+
+    document.getElementById('stats-total-predictions').textContent = totalCount;
+    document.getElementById('stats-avg-confidence').textContent = `${avgConfidence.toFixed(1)}%`;
+    document.getElementById('stats-avg-clarity').textContent = `${avgClarity.toFixed(1)}%`;
+    document.getElementById('stats-corrected-count').textContent = errorCorrections;
+
+    // Refresh charts if on analytics tab
+    if (activeTab === 'analytics') {
+        initAnalyticsCharts();
+    }
+}
+
+function exportHistoryCSV() {
+    const profileHistory = predictionHistory.filter(h => h.profile === currentProfile.name);
+    if (profileHistory.length === 0) {
+        alert("No history data to export.");
         return;
     }
 
     let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Batch ID,Date Logged,Produce Name,Scientific Name,Freshness State,Freshness Score (%),Quality Grade,Weight (g),Shelf Life (Days),Has Disease,Disease Name\r\n";
-
-    state.inventory.forEach(item => {
-        const row = [
-            item.uid,
-            item.date,
-            item.name,
-            item.scientific,
-            item.freshness,
-            item.freshness_val,
-            item.grade,
-            item.weight.replace("g", ""),
-            item.shelf_life,
-            item.has_disease ? "Yes" : "No",
-            item.disease_name || "None"
-        ].map(val => `"${val}"`).join(",");
-        
-        csvContent += row + "\r\n";
+    csvContent += "Timestamp,Model Prediction,Confidence (%),Handwriting Clarity (%),User Corrected Label\r\n";
+    
+    profileHistory.forEach(item => {
+        csvContent += `"${item.timestamp}",${item.predictedLabel},${item.confidence},${item.clarityScore},${item.trueLabel}\r\n`;
     });
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `agroscan_inventory_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `auradigit_prediction_history_${currentProfile.name.replace(/\s+/g, '_')}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 }
 
-// ==========================================
-// DETERMINISTIC QR GENERATOR (ZERO DEPENDENCY)
-// ==========================================
+/* ==========================================================================
+   8. Chart.js Graphs Setup
+   ========================================================================== */
+function initAnalyticsCharts() {
+    const profileHistory = predictionHistory.filter(h => h.profile === currentProfile.name);
+    
+    // 1. Frequency Distribution Bar Chart
+    const freq = new Array(10).fill(0);
+    profileHistory.forEach(h => {
+        const val = parseInt(h.predictedLabel);
+        if (!isNaN(val) && val >= 0 && val <= 9) freq[val]++;
+    });
 
-function viewItemQRCode(idx) {
-    const item = state.inventory[idx];
-    if (!item) return;
+    const ctxDist = document.getElementById('chart-distribution').getContext('2d');
+    if (distributionChart) distributionChart.destroy();
+    
+    const isDark = document.body.classList.contains('dark-theme');
+    const textColor = isDark ? '#9ca3af' : '#4b5563';
+    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
 
-    // Show drawer
-    const drawer = document.getElementById("qr-drawer");
-    drawer.style.display = "flex";
-
-    // Set fields
-    document.getElementById("qr-item-name").innerText = item.name;
-    document.getElementById("qr-uid").innerText = item.uid;
-    document.getElementById("qr-date").innerText = item.date.split(" ")[0];
-    document.getElementById("qr-freshness").innerText = `${item.freshness} (${item.freshness_val}%)`;
-    document.getElementById("qr-grade").innerText = item.grade;
-
-    // Draw QR on canvas
-    generateDeterministicQR(item.uid, item.name, item.grade, item.freshness_val);
-}
-
-function closeQRDrawer() {
-    document.getElementById("qr-drawer").style.display = "none";
-}
-
-function generateDeterministicQR(uid, name, grade, freshnessVal) {
-    const canvas = document.getElementById("qr-canvas");
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    const size = canvas.width;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, size, size);
-
-    // Number of modules (25x25 grid)
-    const modules = 25;
-    const modSize = Math.floor((size - 20) / modules);
-    const offset = Math.floor((size - (modules * modSize)) / 2);
-
-    ctx.fillStyle = "#000000";
-
-    // 1. Helper to draw finder patterns (7x7 nested squares)
-    const drawFinderPattern = (row, col) => {
-        // Outer 7x7 black
-        ctx.fillRect(offset + col * modSize, offset + row * modSize, 7 * modSize, 7 * modSize);
-        // Inner 5x5 white
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(offset + (col + 1) * modSize, offset + (row + 1) * modSize, 5 * modSize, 5 * modSize);
-        // Center 3x3 black
-        ctx.fillStyle = "#000000";
-        ctx.fillRect(offset + (col + 2) * modSize, offset + (row + 2) * modSize, 3 * modSize, 3 * modSize);
-    };
-
-    // Draw three finder patterns
-    drawFinderPattern(0, 0);                 // Top-Left
-    drawFinderPattern(0, modules - 7);       // Top-Right
-    drawFinderPattern(modules - 7, 0);       // Bottom-Left
-
-    // Draw timing patterns (dashed lines connecting finders)
-    for (let i = 8; i < modules - 8; i++) {
-        if (i % 2 === 0) {
-            ctx.fillRect(offset + i * modSize, offset + 6 * modSize, modSize, modSize); // Horizontal timing
-            ctx.fillRect(offset + 6 * modSize, offset + i * modSize, modSize, modSize); // Vertical timing
-        }
-    }
-
-    // Small alignment block at bottom right
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(offset + (modules - 9) * modSize, offset + (modules - 9) * modSize, 5 * modSize, 5 * modSize);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(offset + (modules - 8) * modSize, offset + (modules - 8) * modSize, 3 * modSize, 3 * modSize);
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(offset + (modules - 7) * modSize, offset + (modules - 7) * modSize, modSize, modSize);
-
-    // 2. Generate pseudo-random matrix cells based on hash of details
-    // Ensure it looks like a real QR code but is deterministic per batch
-    const seedText = `${uid}-${name}-${grade}-${freshnessVal}`;
-    let hash = 0;
-    for (let i = 0; i < seedText.length; i++) {
-        hash = seedText.charCodeAt(i) + ((hash << 5) - hash);
-    }
-
-    // Fill matrix
-    for (let r = 0; r < modules; r++) {
-        for (let c = 0; c < modules; c++) {
-            // Skip finder patterns
-            if (r < 8 && c < 8) continue;
-            if (r < 8 && c >= modules - 8) continue;
-            if (r >= modules - 8 && c < 8) continue;
-            // Skip timing lines
-            if (r === 6 || c === 6) continue;
-            // Skip alignment block
-            if (r >= modules - 9 && r <= modules - 5 && c >= modules - 9 && c <= modules - 5) continue;
-
-            // Pseudo-random bit based on position and hash
-            const cellHash = Math.abs(Math.sin((r * 12.9898 + c * 78.233) * 43758.5453 + hash));
-            if (cellHash > 0.5) {
-                ctx.fillRect(offset + c * modSize, offset + r * modSize, modSize, modSize);
+    distributionChart = new Chart(ctxDist, {
+        type: 'bar',
+        data: {
+            labels: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
+            datasets: [{
+                label: 'Class Distribution',
+                data: freq,
+                backgroundColor: 'rgba(139, 92, 246, 0.65)',
+                borderColor: '#8b5cf6',
+                borderWidth: 1,
+                borderRadius: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                y: {
+                    grid: { color: gridColor },
+                    ticks: { color: textColor, stepSize: 1 }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { color: textColor }
+                }
             }
         }
+    });
+
+    // 2. Trend Line Chart over time
+    const trendCtx = document.getElementById('chart-history-trend').getContext('2d');
+    if (trendChart) trendChart.destroy();
+
+    // Take last 15 history items chronologically (reverse array order)
+    const recentHistory = [...profileHistory].slice(0, 15).reverse();
+    const trendLabels = recentHistory.map((_, i) => `Inference ${i+1}`);
+    const trendConfidence = recentHistory.map(h => h.confidence);
+    const trendClarity = recentHistory.map(h => h.clarityScore);
+
+    trendChart = new Chart(trendCtx, {
+        type: 'line',
+        data: {
+            labels: trendLabels,
+            datasets: [
+                {
+                    label: 'Confidence (%)',
+                    data: trendConfidence,
+                    borderColor: '#06b6d4',
+                    backgroundColor: 'rgba(6, 182, 212, 0.08)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3
+                },
+                {
+                    label: 'Clarity Score (%)',
+                    data: trendClarity,
+                    borderColor: '#a855f7',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    tension: 0.3
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    labels: { color: textColor, font: { size: 10 } }
+                }
+            },
+            scales: {
+                y: {
+                    min: 0,
+                    max: 100,
+                    grid: { color: gridColor },
+                    ticks: { color: textColor }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { color: textColor }
+                }
+            }
+        }
+    });
+}
+
+function initTrainingChart() {
+    const ctxTrain = document.getElementById('chart-training-loss').getContext('2d');
+    if (trainingLossChart) return; // avoid rebuild
+
+    const isDark = document.body.classList.contains('dark-theme');
+    const textColor = isDark ? '#9ca3af' : '#4b5563';
+    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
+
+    trainingLossChart = new Chart(ctxTrain, {
+        type: 'line',
+        data: {
+            labels: trainingEpochLabels,
+            datasets: [{
+                label: 'Training Loss',
+                data: trainingLossData,
+                borderColor: '#ec4899',
+                backgroundColor: 'rgba(236, 72, 153, 0.08)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    grid: { color: gridColor },
+                    ticks: { color: textColor }
+                },
+                x: {
+                    grid: { color: gridColor },
+                    ticks: { color: textColor }
+                }
+            }
+        }
+    });
+}
+
+/* ==========================================================================
+   9. Browser Adaptive Retraining Engine
+   ========================================================================== */
+const retrainConsoleLogs = document.getElementById('train-console-logs');
+
+function updateRetrainingUI() {
+    const count = correctedPool.images.length;
+    retrainSampleCount.textContent = `${count} samples collected`;
+    
+    // Scale progress bar to 10 samples (arbitrary target for retraining)
+    const progress = Math.min(100, (count / 10) * 100);
+    retrainSampleBar.style.width = `${progress}%`;
+    
+    // Enable button if at least 1 sample is corrected
+    startRetrainBtn.disabled = (count === 0);
+}
+
+startRetrainBtn.addEventListener('click', triggerOnlineRetraining);
+
+async function triggerOnlineRetraining() {
+    if (correctedPool.images.length === 0) return;
+    
+    startRetrainBtn.disabled = true;
+    startRetrainBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Fine-Tuning...';
+    
+    // Reset training charts
+    trainingLossData.length = 0;
+    trainingEpochLabels.length = 0;
+    if (trainingLossChart) {
+        trainingLossChart.data.labels = trainingEpochLabels;
+        trainingLossChart.data.datasets[0].data = trainingLossData;
+        trainingLossChart.update();
+    }
+
+    retrainConsoleLogs.innerHTML = '';
+    logToConsole("Initializing Adaptive Training Loop...", 'system-log');
+    logToConsole(`Loaded ${correctedPool.images.length} handwritten examples.`, 'info-log');
+    logToConsole(`Compiling layers using standard Stochastic Gradient Descent...`, 'system-log');
+    
+    const epochs = parseInt(document.getElementById('param-epochs').value);
+    const lr = parseFloat(document.getElementById('param-lr').value);
+    const batch = parseInt(document.getElementById('param-batch').value);
+
+    // Call fineTuneModel in model.js
+    const success = await fineTuneModel(
+        correctedPool.images, 
+        correctedPool.labels, 
+        epochs, 
+        lr, 
+        batch, 
+        (epoch, loss, acc) => {
+            // Epoch callback updates UI
+            document.getElementById('train-current-epoch').textContent = `${epoch} / ${epochs}`;
+            document.getElementById('train-current-loss').textContent = loss.toFixed(4);
+            document.getElementById('train-current-acc').textContent = `${(acc * 100).toFixed(1)}%`;
+            
+            // Add point to chart
+            trainingEpochLabels.push(`Ep ${epoch}`);
+            trainingLossData.push(loss);
+            if (trainingLossChart) trainingLossChart.update();
+            
+            logToConsole(`Epoch ${epoch}/${epochs} completed. Loss: ${loss.toFixed(4)}`, 'info-log');
+        }
+    );
+
+    if (success) {
+        logToConsole("Fine-tuning completed successfully! Local weights updated.", 'info-log');
+        alert("Success! The model was successfully fine-tuned on your handwriting samples.");
+        
+        // Align trueLabel to predictedLabel for all corrected items so pool rebuilds to empty
+        predictionHistory.forEach(h => {
+            if (h.profile === currentProfile.name && h.trueLabel !== h.predictedLabel) {
+                h.predictedLabel = h.trueLabel;
+            }
+        });
+        saveHistoryToStorage();
+        
+        // Clear retraining pool on success
+        correctedPool.images = [];
+        correctedPool.labels = [];
+        updateRetrainingUI();
+    } else {
+        logToConsole("ERROR: Training session crashed. Check browser console logs.", 'system-log');
+        alert("Training failed. Ensure parameters are valid and redraw samples.");
+    }
+    
+    startRetrainBtn.disabled = false;
+    startRetrainBtn.innerHTML = '<i class="fa-solid fa-microchip"></i> Start Online Training';
+}
+
+function logToConsole(text, className = '') {
+    const span = document.createElement('span');
+    span.className = className;
+    span.textContent = `> ${text}`;
+    retrainConsoleLogs.appendChild(span);
+    retrainConsoleLogs.scrollTop = retrainConsoleLogs.scrollHeight; // Autoscroll
+}
+
+/* ==========================================================================
+   10. Profile Mock Authentication & Settings
+   ========================================================================== */
+function initProfiles() {
+    // Load existing profiles from localStorage or create defaults
+    const data = localStorage.getItem('auradigit_profiles');
+    if (data) {
+        profiles = JSON.parse(data);
+    } else {
+        profiles = [
+            { name: "Guest Student", role: "Right-Handed" },
+            { name: "Professor Reviewer", role: "Left-Handed" }
+        ];
+        localStorage.setItem('auradigit_profiles', JSON.stringify(profiles));
+    }
+    
+    const activeProf = localStorage.getItem('auradigit_active_profile');
+    if (activeProf) {
+        const found = profiles.find(p => p.name === activeProf);
+        if (found) currentProfile = found;
+    }
+    
+    updateActiveProfileUI();
+    renderProfileDropdownList();
+    
+    // Rebuild retraining pool from any previously corrected history entries
+    loadRetrainingPoolFromHistory();
+    
+    // Toggle dropdown — use fixed positioning so backdrop-filter doesn't clip it
+    profileWidget.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = profileDropdownMenu.classList.contains('show');
+        if (!isVisible) {
+            // Position dropdown exactly below the profile widget
+            const rect = profileWidget.getBoundingClientRect();
+            profileDropdownMenu.style.top = (rect.bottom + 8) + 'px';
+            profileDropdownMenu.style.right = (window.innerWidth - rect.right) + 'px';
+        }
+        profileDropdownMenu.classList.toggle('show');
+    });
+    
+    window.addEventListener('click', () => {
+        profileDropdownMenu.classList.remove('show');
+    });
+}
+
+function updateActiveProfileUI() {
+    document.getElementById('user-display-name').textContent = currentProfile.name;
+    document.getElementById('user-display-profile').textContent = currentProfile.role;
+    localStorage.setItem('auradigit_active_profile', currentProfile.name);
+    
+    // Rebuild retraining pool for the newly active profile
+    loadRetrainingPoolFromHistory();
+    
+    // Update data dashboards
+    updateAnalyticsDashboard();
+    updateCoachProfile();
+}
+
+function renderProfileDropdownList() {
+    profileListContainer.innerHTML = '';
+    profiles.forEach(prof => {
+        const btn = document.createElement('button');
+        btn.className = 'dropdown-item';
+        btn.textContent = `${prof.name} (${prof.role})`;
+        
+        btn.addEventListener('click', () => {
+            currentProfile = prof;
+            updateActiveProfileUI();
+            // Reload stats and tables
+            renderHistoryTable();
+        });
+        
+        profileListContainer.appendChild(btn);
+    });
+}
+
+// Profile modal controls
+createProfileBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    profileModal.style.display = 'flex';
+    profileDropdownMenu.classList.remove('show');
+});
+
+modalCancelBtn.addEventListener('click', () => {
+    profileModal.style.display = 'none';
+});
+
+modalSubmitBtn.addEventListener('click', () => {
+    const nameInput = document.getElementById('new-profile-name').value.trim();
+    const roleSelect = document.getElementById('new-profile-role').value;
+    
+    if (nameInput === '') {
+        alert("Please enter a valid profile name.");
+        return;
+    }
+
+    // Check for duplicates
+    if (profiles.some(p => p.name.toLowerCase() === nameInput.toLowerCase())) {
+        alert("A profile with this name already exists.");
+        return;
+    }
+
+    const newProf = { name: nameInput, role: roleSelect };
+    profiles.push(newProf);
+    localStorage.setItem('auradigit_profiles', JSON.stringify(profiles));
+    
+    currentProfile = newProf;
+    
+    updateActiveProfileUI();
+    renderProfileDropdownList();
+    
+    // Reset modal
+    document.getElementById('new-profile-name').value = '';
+    profileModal.style.display = 'none';
+    
+    renderHistoryTable();
+});
+
+/* ==========================================================================
+   11. Helper features: Voice, Themes, Initializations
+   ========================================================================== */
+// Text to speech voice synthesis
+document.getElementById('speak-btn').addEventListener('click', () => {
+    const digit = predictedDigit.textContent;
+    const confidence = predictionConfidence.textContent;
+    
+    if (digit === '-') return;
+    
+    let text = `Predicted digit: ${digit} with ${confidence} confidence.`;
+    
+    // Check if words representation is active
+    const translationPanel = document.getElementById('text-translation-panel');
+    const translationVal = document.getElementById('text-translation-val');
+    
+    if (translationPanel && translationPanel.style.display !== 'none') {
+        const words = translationVal.textContent;
+        text = `Predicted value: ${words}`;
+    }
+    
+    // Check if multi-digit expression is active
+    const mathMode = mathModeToggle.checked;
+    if (mathMode && mathResultPanel.style.display !== 'none') {
+        const expression = mathExprText.textContent;
+        const result = mathSolvedVal.textContent;
+        let resWords = result;
+        if (!isNaN(parseInt(result))) {
+            resWords = convertNumberToWords(result);
+        }
+        text = `Calculated expression: ${expression} equals ${resWords}`;
+    }
+
+    if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.95;
+        // Select an English voice if available
+        const voices = window.speechSynthesis.getVoices();
+        const englishVoice = voices.find(v => v.lang.startsWith('en'));
+        if (englishVoice) utterance.voice = englishVoice;
+        
+        window.speechSynthesis.speak(utterance);
+    } else {
+        alert("Web Speech API voice synthesis is not supported on this browser.");
+    }
+});
+
+// Light/Dark Theme Switcher
+themeToggleBtn.addEventListener('click', () => {
+    const body = document.body;
+    if (body.classList.contains('dark-theme')) {
+        body.classList.remove('dark-theme');
+        body.classList.add('light-theme');
+        themeToggleBtn.innerHTML = '<i class="fa-solid fa-moon"></i>';
+        localStorage.setItem('auradigit_theme', 'light');
+    } else {
+        body.classList.remove('light-theme');
+        body.classList.add('dark-theme');
+        themeToggleBtn.innerHTML = '<i class="fa-solid fa-sun"></i>';
+        localStorage.setItem('auradigit_theme', 'dark');
+    }
+    
+    // Trigger charts update to update grid lines and text colors
+    if (activeTab === 'analytics') {
+        initAnalyticsCharts();
+    }
+});
+
+// Load saved theme preference
+function loadSavedTheme() {
+    const theme = localStorage.getItem('auradigit_theme');
+    if (theme === 'light') {
+        document.body.className = 'light-theme';
+        themeToggleBtn.innerHTML = '<i class="fa-solid fa-moon"></i>';
+    } else {
+        document.body.className = 'dark-theme';
+        themeToggleBtn.innerHTML = '<i class="fa-solid fa-sun"></i>';
     }
 }
 
-function printQRCode() {
-    const canvas = document.getElementById("qr-canvas");
-    if (!canvas) return;
+// Global Handwriting Habits Analyzer for Coach Tab
+let coachProgressChart = null;
 
-    const win = window.open("", "Print Label", "width=400,height=400");
-    const date = document.getElementById("qr-date").innerText;
-    const uid = document.getElementById("qr-uid").innerText;
-    const name = document.getElementById("qr-item-name").innerText;
-    const grade = document.getElementById("qr-grade").innerText;
-    const freshness = document.getElementById("qr-freshness").innerText;
+function updateCoachProfile() {
+    const profileHistory = predictionHistory.filter(h => h.profile === currentProfile.name);
+    const habitsBody = document.getElementById('coach-habits-body');
+    
+    if (profileHistory.length === 0) {
+        habitsBody.innerHTML = '<p class="empty-table-msg">Log some predictions to compile writing habits.</p>';
+        if (coachProgressChart) coachProgressChart.destroy();
+        return;
+    }
 
-    win.document.write(`
-        <html>
-            <head>
-                <title>Print QR Label</title>
-                <style>
-                    body { font-family: sans-serif; text-align: center; padding: 20px; }
-                    .label-container { border: 2px solid #000; padding: 20px; display: inline-block; border-radius: 8px; }
-                    h2 { margin: 0 0 10px 0; }
-                    img { width: 160px; height: 160px; }
-                    .details { font-size: 12px; margin-top: 10px; text-align: left; }
-                </style>
-            </head>
-            <body>
-                <div class="label-container">
-                    <h2>AGROSCAN LOGISTICS</h2>
-                    <img src="${canvas.toDataURL()}" />
-                    <div class="details">
-                        <div><strong>UID:</strong> ${uid}</div>
-                        <div><strong>Produce:</strong> ${name}</div>
-                        <div><strong>Quality:</strong> ${grade}</div>
-                        <div><strong>Freshness:</strong> ${freshness}</div>
-                        <div><strong>Logged Date:</strong> ${date}</div>
-                        <div><strong>Origin:</strong> Smart Farms Ltd.</div>
-                    </div>
-                </div>
-                <script>
-                    window.onload = function() { window.print(); window.close(); }
-                </script>
-            </body>
-        </html>
-    `);
-    win.document.close();
+    let sumClarity = 0;
+    profileHistory.forEach(h => sumClarity += h.clarityScore);
+    const avgClarity = Math.round(sumClarity / profileHistory.length);
+
+    // Dynamic coach text advice
+    let habitAdvice = "";
+    if (avgClarity >= 90) {
+        habitAdvice = "Excellent precision! You consistently write highly centered, clear strokes that conform well to the MNIST distribution.";
+    } else if (avgClarity >= 75) {
+        habitAdvice = "Great styling overall. To achieve 90%+, pay closer attention to stroke consistency and avoid writing too quickly.";
+    } else {
+        habitAdvice = "Your drawings average low clarity scores. Try using a thicker brush size (28-32px) and centering the digits manually in the canvas crop box.";
+    }
+
+    habitsBody.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:10px; font-size:0.85rem; line-height:1.4;">
+            <div style="display:flex; justify-content:space-between;">
+                <span>Historical Clarity Average:</span>
+                <strong class="glow-text">${avgClarity}%</strong>
+            </div>
+            <div class="divider" style="margin: 5px 0;"></div>
+            <p style="color: var(--text-secondary);">${habitAdvice}</p>
+        </div>
+    `;
+
+    // Render Clarity progress line chart
+    const recentHistory = [...profileHistory].slice(0, 10).reverse();
+    const labels = recentHistory.map((_, i) => `Drawing ${i+1}`);
+    const clarityData = recentHistory.map(h => h.clarityScore);
+
+    const ctxProgress = document.getElementById('chart-coach-progress').getContext('2d');
+    if (coachProgressChart) coachProgressChart.destroy();
+
+    const isDark = document.body.classList.contains('dark-theme');
+    const textColor = isDark ? '#9ca3af' : '#4b5563';
+    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
+
+    coachProgressChart = new Chart(ctxProgress, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Clarity Score (%)',
+                data: clarityData,
+                borderColor: '#a855f7',
+                backgroundColor: 'rgba(168, 85, 247, 0.08)',
+                borderWidth: 2.5,
+                fill: true,
+                tension: 0.3
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                y: {
+                    min: 0,
+                    max: 100,
+                    grid: { color: gridColor },
+                    ticks: { color: textColor }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { color: textColor }
+                }
+            }
+        }
+    });
 }
+
+// Number Converter to words
+function convertNumberToWords(numStr) {
+    const num = Math.abs(parseInt(numStr));
+    if (isNaN(num)) return "-";
+    if (num === 0) return "Zero";
+
+    const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+    function g(n) {
+        if (n < 20) return a[n];
+        const digit = n % 10;
+        return b[Math.floor(n / 10)] + (digit ? " " + a[digit] : "");
+    }
+
+    function h(n) {
+        if (n < 100) return g(n);
+        return a[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " " + g(n % 100) : "");
+    }
+
+    let n = num;
+    let str = "";
+    const units = ["", " Thousand", " Million", " Billion"];
+    let unitIdx = 0;
+
+    while (n > 0) {
+        const chunk = n % 1000;
+        if (chunk > 0) {
+            str = h(chunk) + units[unitIdx] + (str ? " " + str : "");
+        }
+        n = Math.floor(n / 1000);
+        unitIdx++;
+    }
+
+    return str.trim();
+}
+
+// Global initialization on page load
+window.addEventListener('load', () => {
+    loadSavedTheme();
+    initCanvas();
+    loadHistoryFromStorage();
+    initProfiles();
+    
+    // Bind exporter button click
+    const exportBtn = document.getElementById('export-model-btn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', downloadCurrentModel);
+    }
+});

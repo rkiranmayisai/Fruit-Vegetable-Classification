@@ -3,561 +3,650 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AGROSCAN - AI Produce Classifier & Freshness Detector</title>
-    <meta name="description" content="AI-driven agricultural quality grading, freshness detection, disease diagnostics, and inventory management platform.">
-    <!-- Google Fonts -->
+    <title>AuraDigit | Advanced MNIST Handwriting Recognition & Coach</title>
+    <!-- Google Fonts: Outfit & Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Stylesheet -->
-    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom Style Sheet -->
+    <link rel="stylesheet" href="style.css">
+    <!-- TensorFlow.js Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+    <!-- Chart.js for beautiful analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body>
+<body class="dark-theme">
     <div class="app-container">
+        
         <!-- Sidebar Navigation -->
-        <aside class="app-sidebar">
-            <div class="sidebar-logo">
-                <span class="logo-icon">🌱</span>
-                <h2>AGRO<span class="logo-accent">SCAN</span></h2>
+        <aside class="sidebar">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-brain-circuit"></i>
+                </div>
+                <h2>AuraDigit</h2>
             </div>
-            <nav class="sidebar-menu">
-                <button class="menu-item active" id="tab-dashboard" onclick="switchView('dashboard')">
-                    <span class="menu-icon">📊</span> Dashboard
+            <nav class="nav-menu">
+                <button class="nav-btn active" data-tab="workspace">
+                    <i class="fa-solid fa-pen-nib"></i>
+                    <span>Inference Lab</span>
                 </button>
-                <button class="menu-item" id="tab-inventory" onclick="switchView('inventory')">
-                    <span class="menu-icon">📦</span> Smart Inventory
+                <button class="nav-btn" data-tab="coach">
+                    <i class="fa-solid fa-graduation-cap"></i>
+                    <span>Handwriting Coach</span>
                 </button>
-                <button class="menu-item" id="tab-harvest" onclick="switchView('harvest')">
-                    <span class="menu-icon">🌾</span> Harvest & Storage Guide
+                <button class="nav-btn" data-tab="analytics">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Analytics Dashboard</span>
+                </button>
+                <button class="nav-btn" data-tab="model-hub">
+                    <i class="fa-solid fa-sliders"></i>
+                    <span>Model Retraining</span>
+                </button>
+                <button class="nav-btn" data-tab="help-guide">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <span>Architecture Guide</span>
                 </button>
             </nav>
             <div class="sidebar-footer">
-                <div class="sys-status">
-                    <span class="status-dot green"></span>
-                    <span class="status-text">CV Pipeline Online</span>
+                <div class="status-indicator">
+                    <span class="status-dot online"></span>
+                    <span id="model-status-text">Loading Model...</span>
                 </div>
-                <div class="sys-version">v1.1.2 (Py3.14 + CV2)</div>
+                <p>&copy; 2026 AuraDigit Project</p>
             </div>
         </aside>
 
-        <!-- Main Workspace -->
-        <main class="app-content">
-            <!-- Header bar -->
-            <header class="app-header">
-                <div class="header-search">
-                    <h1>Agricultural Quality Assessment & Diagnostics</h1>
+        <!-- Main Window Area -->
+        <main class="main-content">
+            
+            <!-- Top Bar Header -->
+            <header class="top-bar">
+                <div class="page-title">
+                    <h1 id="current-tab-title">Inference Lab</h1>
+                    <p id="current-tab-subtitle">Draw, upload, or use real-time camera recognition</p>
                 </div>
-                
-                <!-- Voice Assistant glowing widget -->
-                <div class="voice-assistant-widget" id="voice-assistant-widget">
-                    <div class="mic-status-txt" id="mic-status">Voice Assistant Idle</div>
-                    <button class="btn-mic" id="btn-microphone" title="Toggle Voice Assistant">
-                        <span class="mic-icon">🎙️</span>
-                        <span class="pulse-ring"></span>
+                <div class="header-actions">
+                    <!-- Theme Toggle -->
+                    <button id="theme-toggle-btn" class="icon-btn" title="Toggle Light/Dark Mode">
+                        <i class="fa-solid fa-sun"></i>
                     </button>
+                    
+                    <!-- Profile Mock Authentication -->
+                    <div class="profile-widget">
+                        <i class="fa-solid fa-user-circle avatar"></i>
+                        <div class="profile-info">
+                            <span class="profile-name" id="user-display-name">Guest Student</span>
+                            <span class="profile-role" id="user-display-profile">Default Profile</span>
+                        </div>
+                        <i class="fa-solid fa-chevron-down dropdown-arrow"></i>
+                        <div class="profile-dropdown" id="profile-dropdown-menu">
+                            <div class="dropdown-header">Switch Profile</div>
+                            <div class="dropdown-list" id="profile-list">
+                                <!-- Dynamic profile list -->
+                            </div>
+                            <div class="dropdown-divider"></div>
+                            <button class="dropdown-action" id="create-profile-btn">
+                                <i class="fa-solid fa-plus"></i> New Profile
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </header>
 
-            <!-- Stats Bar -->
-            <section class="stats-row">
-                <div class="stat-card">
-                    <div class="stat-icon purple">🔍</div>
-                    <div class="stat-details">
-                        <span class="stat-label">Total Scans</span>
-                        <h3 class="stat-value" id="stats-total-scans">0</h3>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon green">🥗</div>
-                    <div class="stat-details">
-                        <span class="stat-label">Average Freshness</span>
-                        <h3 class="stat-value" id="stats-avg-freshness">0%</h3>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon orange">🏆</div>
-                    <div class="stat-details">
-                        <span class="stat-label">Grade A Produce</span>
-                        <h3 class="stat-value" id="stats-grade-a">0%</h3>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon red">⚠️</div>
-                    <div class="stat-details">
-                        <span class="stat-label">Alerts (Decay/Disease)</span>
-                        <h3 class="stat-value" id="stats-alerts">0</h3>
-                    </div>
-                </div>
-            </section>
+            <!-- Content Area Container -->
+            <div class="content-body">
+                
+                <!-- TAB 1: WORKSPACE -->
+                <section class="tab-pane active" id="pane-workspace">
+                    <div class="workspace-layout">
+                        
+                        <!-- Left Side: Inputs -->
+                        <div class="card glass input-card">
+                            <div class="tab-selectors">
+                                <button class="sub-tab-btn active" data-mode="canvas">
+                                    <i class="fa-solid fa-signature"></i> Canvas Draw
+                                </button>
+                                <button class="sub-tab-btn" data-mode="webcam">
+                                    <i class="fa-solid fa-video"></i> Camera Stream
+                                </button>
+                                <button class="sub-tab-btn" data-mode="upload">
+                                    <i class="fa-solid fa-file-arrow-up"></i> Upload Image
+                                </button>
+                            </div>
 
-            <!-- VIEW: DASHBOARD -->
-            <section id="view-dashboard" class="content-view active">
-                <div class="dashboard-grid">
-                    <!-- Left: Control Panels (Input sources) -->
-                    <div class="panel-column-left">
-                        <!-- Input Sources Card -->
-                        <div class="glass-card panel-input">
-                            <div class="card-header">
-                                <h3>Produce Input Stream</h3>
-                                <div class="tab-controls">
-                                    <button class="tab-btn active" id="btn-tab-upload" onclick="switchInputMode('upload')">File Upload</button>
-                                    <button class="tab-btn" id="btn-tab-webcam" onclick="switchInputMode('webcam')">Live Webcam</button>
+                            <!-- Sub-Tab Content: Drawing Canvas -->
+                            <div class="sub-pane active" id="sub-pane-canvas">
+                                <div class="canvas-container">
+                                    <canvas id="drawing-canvas" width="450" height="450"></canvas>
+                                    <canvas id="heatmap-canvas" width="450" height="450"></canvas>
+                                    <div class="canvas-grid-overlay" id="grid-overlay"></div>
+                                </div>
+                                <div class="canvas-controls">
+                                    <button class="btn btn-secondary" id="canvas-undo-btn">
+                                        <i class="fa-solid fa-rotate-left"></i> Undo
+                                    </button>
+                                    <button class="btn btn-secondary" id="canvas-redo-btn">
+                                        <i class="fa-solid fa-rotate-right"></i> Redo
+                                    </button>
+                                    <button class="btn btn-secondary" id="canvas-center-btn">
+                                        <i class="fa-solid fa-arrows-to-eye"></i> Auto Center
+                                    </button>
+                                    <button class="btn btn-secondary" id="grid-toggle-btn">
+                                        <i class="fa-solid fa-border-all"></i> Grid
+                                    </button>
+                                    <button class="btn btn-danger" id="canvas-clear-btn">
+                                        <i class="fa-solid fa-trash-can"></i> Clear Canvas
+                                    </button>
+                                </div>
+                                <div class="canvas-brush-picker">
+                                    <span class="brush-label">Brush Size:</span>
+                                    <input type="range" id="brush-size" min="15" max="45" value="28">
+                                    <span class="brush-val" id="brush-size-val">28px</span>
+                                </div>
+                            </div>
+
+                            <!-- Sub-Tab Content: Webcam Stream -->
+                            <div class="sub-pane" id="sub-pane-webcam">
+                                <div class="webcam-wrapper">
+                                    <video id="webcam-video" autoplay playsinline muted></video>
+                                    <div class="webcam-overlay">
+                                        <div class="webcam-crop-box"></div>
+                                    </div>
+                                    <div class="webcam-placeholder">
+                                        <i class="fa-solid fa-camera-retro"></i>
+                                        <button class="btn btn-primary" id="start-webcam-btn">
+                                            Enable Camera Access
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="webcam-controls">
+                                    <button class="btn btn-primary" id="toggle-stream-btn" disabled>
+                                        <i class="fa-solid fa-pause"></i> Pause Inference
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Sub-Tab Content: Image Upload -->
+                            <div class="sub-pane" id="sub-pane-upload">
+                                <div class="upload-dropzone" id="upload-zone">
+                                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                                    <h3>Drag & Drop handwritten digit image here</h3>
+                                    <p>or click to browse local files (Supports JPEG, PNG)</p>
+                                    <input type="file" id="file-input" accept="image/*" style="display:none;">
+                                </div>
+                                <div class="upload-preview-container" id="upload-preview" style="display:none;">
+                                    <div class="preview-box">
+                                        <img id="uploaded-image-preview" alt="Uploaded source">
+                                    </div>
+                                    <button class="btn btn-secondary" id="reset-upload-btn">
+                                        <i class="fa-solid fa-xmark"></i> Remove Image
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Side: Real-time Output & Analytics -->
+                        <div class="workspace-results">
+                            
+                            <!-- Prediction Panel -->
+                            <div class="card glass prediction-card">
+                                <h3>Prediction Analysis</h3>
+                                <div class="prediction-body">
+                                    <div class="prediction-display">
+                                        <div class="predicted-digit-container">
+                                            <span id="predicted-digit">-</span>
+                                            <span class="predicted-label">PREDICTED DIGIT</span>
+                                        </div>
+                                        <div class="prediction-metrics">
+                                            <div class="metric-item">
+                                                <span class="metric-lbl">Confidence</span>
+                                                <span class="metric-val" id="prediction-confidence">0.0%</span>
+                                                <div class="progress-bar-container">
+                                                    <div class="progress-bar" id="confidence-bar" style="width: 0%"></div>
+                                                </div>
+                                            </div>
+                                            <div class="metric-item">
+                                                <span class="metric-lbl">Inference Latency</span>
+                                                <span class="metric-val" id="inference-latency">0ms</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="digit-to-text-panel" id="text-translation-panel" style="display:none; margin-top: 10px; padding: 8px 12px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-glass); border-radius: var(--border-radius-md);">
+                                        <span class="translation-lbl" style="font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; display: block; margin-bottom: 2px;">Words Representation</span>
+                                        <p class="translation-text" id="text-translation-val" style="font-family: 'Outfit', sans-serif; font-size: 0.95rem; font-weight: 600; color: var(--color-cyan); margin: 0;">-</p>
+                                    </div>
+                                    <div class="result-actions">
+                                        <button class="btn btn-secondary" id="speak-btn" title="Speak prediction">
+                                            <i class="fa-solid fa-volume-high"></i> Speak
+                                        </button>
+                                        <button class="btn btn-secondary" id="save-history-btn">
+                                            <i class="fa-solid fa-floppy-disk"></i> Log to History
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- XAI Explainability (Saliency Map) -->
+                            <div class="card glass xai-card">
+                                <div class="card-header-toggle">
+                                    <h3>Explainable AI (XAI)</h3>
+                                    <div class="toggle-switch-container">
+                                        <span class="toggle-label">Overlay Heatmap</span>
+                                        <label class="switch">
+                                            <input type="checkbox" id="heatmap-overlay-toggle">
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="xai-body">
+                                    <div class="xai-viewports">
+                                        <div class="xai-view">
+                                            <canvas id="preprocessed-canvas" width="140" height="140"></canvas>
+                                            <span>28×28 Grayscale Input</span>
+                                        </div>
+                                        <div class="xai-view">
+                                            <canvas id="saliency-canvas" width="140" height="140"></canvas>
+                                            <span>XAI Saliency Heatmap</span>
+                                        </div>
+                                    </div>
+                                    <div class="xai-explanation">
+                                        <p><i class="fa-solid fa-circle-question"></i> The saliency map uses backpropagation gradients to color coding regions that most influenced the classification. <strong class="glow-text">Glowing areas</strong> contributed positively to the predicted class.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Multi-Digit & Equation Solver -->
+                            <div class="card glass multi-digit-card">
+                                <div class="card-header-toggle">
+                                    <h3>Multi-Digit & Math Solver</h3>
+                                    <label class="switch-badge">
+                                        <input type="checkbox" id="math-mode-toggle">
+                                        <span class="badge-text">Equation Mode</span>
+                                    </label>
+                                </div>
+                                <div class="segmentation-body">
+                                    <div class="segmentation-scroll" id="segments-container">
+                                        <div class="placeholder-text">Draw multiple items separated by spaces to trigger segmentation.</div>
+                                    </div>
+                                    
+                                    <div class="math-result-panel" id="math-result-panel" style="display:none;">
+                                        <span class="math-expression" id="math-expr-text">5 + 7</span>
+                                        <span class="math-equals">=</span>
+                                        <span class="math-solved" id="math-solved-val">12</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </section>
+
+                <!-- TAB 2: HANDWRITING COACH -->
+                <section class="tab-pane" id="pane-coach">
+                    <div class="coach-layout">
+                        
+                        <div class="coach-sidebar">
+                            <div class="card glass coach-score-card">
+                                <h3>Stroke Clarity Score</h3>
+                                <div class="gauge-container">
+                                    <svg viewBox="0 0 100 100" class="gauge">
+                                        <circle cx="50" cy="50" r="40" class="gauge-bg"></circle>
+                                        <circle cx="50" cy="50" r="40" class="gauge-fill" id="coach-gauge-fill" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                                    </svg>
+                                    <div class="gauge-text">
+                                        <span id="coach-score-text">0%</span>
+                                    </div>
+                                </div>
+                                <p class="coach-rating-label" id="coach-rating-label">Draw a digit to begin coaching analysis</p>
+                            </div>
+
+                            <div class="card glass coach-stats-card">
+                                <h3>Detailed Dimensions</h3>
+                                <div class="coach-metrics-list">
+                                    <div class="coach-metric-row">
+                                        <span>Centering (X/Y)</span>
+                                        <div class="coach-progress">
+                                            <div class="bar" id="coach-metric-centering" style="width: 0%"></div>
+                                        </div>
+                                        <span class="val-txt" id="coach-val-centering">0%</span>
+                                    </div>
+                                    <div class="coach-metric-row">
+                                        <span>Stroke Thickness</span>
+                                        <div class="coach-progress">
+                                            <div class="bar" id="coach-metric-thickness" style="width: 0%"></div>
+                                        </div>
+                                        <span class="val-txt" id="coach-val-thickness">0%</span>
+                                    </div>
+                                    <div class="coach-metric-row">
+                                        <span>Contrast Ratio</span>
+                                        <div class="coach-progress">
+                                            <div class="bar" id="coach-metric-contrast" style="width: 0%"></div>
+                                        </div>
+                                        <span class="val-txt" id="coach-val-contrast">0%</span>
+                                    </div>
+                                    <div class="coach-metric-row">
+                                        <span>Stroke Continuity</span>
+                                        <div class="coach-progress">
+                                            <div class="bar" id="coach-metric-continuity" style="width: 0%"></div>
+                                        </div>
+                                        <span class="val-txt" id="coach-val-continuity">0%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="coach-main">
+                            <div class="card glass coach-feedback-card">
+                                <h3>Handwriting Feedback & Advice</h3>
+                                <div class="feedback-suggestions" id="coach-feedback-box">
+                                    <div class="coach-placeholder">
+                                        <i class="fa-solid fa-compass-drafting animate-float"></i>
+                                        <p>Draw any digit on the Canvas in the **Inference Lab** tab, then return here to receive professional feedback on your writing structure.</p>
+                                    </div>
                                 </div>
                             </div>
                             
-                            <!-- File Upload Tab -->
-                            <div class="input-tab-content active" id="input-upload-container">
-                                <div class="drag-drop-area" id="drop-zone">
-                                    <div class="drag-drop-inner">
-                                        <span class="upload-large-icon">📤</span>
-                                        <p>Drag and drop image here or <strong>browse files</strong></p>
-                                        <span class="file-limits">Supports JPG, PNG, JPEG (Max 8MB)</span>
-                                        <input type="file" id="file-input" accept="image/*" style="display: none;">
-                                    </div>
+                            <div class="card glass ideal-shapes-card">
+                                <h3>NIST Reference Shapes</h3>
+                                <p>Compare your handwriting style with standard MNIST datasets reference shapes.</p>
+                                <div class="digit-shapes-grid">
+                                    <div class="shape-item"><span>0</span><div class="shape-box stroke-0"></div></div>
+                                    <div class="shape-item"><span>1</span><div class="shape-box stroke-1"></div></div>
+                                    <div class="shape-item"><span>2</span><div class="shape-box stroke-2"></div></div>
+                                    <div class="shape-item"><span>3</span><div class="shape-box stroke-3"></div></div>
+                                    <div class="shape-item"><span>4</span><div class="shape-box stroke-4"></div></div>
+                                    <div class="shape-item"><span>5</span><div class="shape-box stroke-5"></div></div>
+                                    <div class="shape-item"><span>6</span><div class="shape-box stroke-6"></div></div>
+                                    <div class="shape-item"><span>7</span><div class="shape-box stroke-7"></div></div>
+                                    <div class="shape-item"><span>8</span><div class="shape-box stroke-8"></div></div>
+                                    <div class="shape-item"><span>9</span><div class="shape-box stroke-9"></div></div>
                                 </div>
                             </div>
-
-                            <!-- Webcam Tab -->
-                            <div class="input-tab-content" id="input-webcam-container">
-                                <div class="webcam-viewport-wrapper">
-                                    <video id="webcam-video" autoplay playsinline></video>
-                                    <canvas id="webcam-capture-canvas" style="display: none;"></canvas>
-                                    <div class="webcam-controls">
-                                        <button class="btn-primary" id="btn-webcam-toggle" onclick="toggleWebcam()">Start Camera</button>
-                                        <button class="btn-accent" id="btn-webcam-capture" onclick="captureWebcamFrame()" disabled>Capture Image</button>
-                                    </div>
+                            
+                            <div class="card glass coach-progress-chart-card" style="margin-top: 1.5rem; padding: 1.5rem;">
+                                <h3>Clarity Progress Trend</h3>
+                                <div class="chart-container-inner" style="height: 180px; position: relative;">
+                                    <canvas id="chart-coach-progress"></canvas>
                                 </div>
                             </div>
-
-                            <!-- Demo Samples Row -->
-                            <div class="demo-samples-wrapper">
-                                <h4>Or test with demo sample images:</h4>
-                                <div class="demo-samples-list" id="samples-list-container">
-                                    <!-- Populated dynamically via JS -->
-                                    <div class="demo-sample-loading">Loading demo samples...</div>
+                            
+                            <div class="card glass coach-habits-card" style="margin-top: 1.5rem; padding: 1.5rem;">
+                                <h3>Historical Writing Profile</h3>
+                                <div class="habits-body" id="coach-habits-body">
+                                    <p class="empty-table-msg">Log some predictions to compile writing habits.</p>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Voice assistant feedback window -->
-                        <div class="glass-card panel-voice-console">
-                            <div class="card-header">
-                                <h3>Voice Assistant Terminal</h3>
-                                <span class="badge blue">Interactive</span>
+                    </div>
+                </section>
+
+                <!-- TAB 3: ANALYTICS -->
+                <section class="tab-pane" id="pane-analytics">
+                    <!-- Key Statistics Cards -->
+                    <div class="stats-overview">
+                        <div class="card glass stat-card">
+                            <span class="stat-title">Logged Predictions</span>
+                            <span class="stat-number" id="stats-total-predictions">0</span>
+                        </div>
+                        <div class="card glass stat-card">
+                            <span class="stat-title">Average Confidence</span>
+                            <span class="stat-number" id="stats-avg-confidence">0.0%</span>
+                        </div>
+                        <div class="card glass stat-card">
+                            <span class="stat-title">Handwriting Clarity</span>
+                            <span class="stat-number" id="stats-avg-clarity">0.0%</span>
+                        </div>
+                        <div class="card glass stat-card">
+                            <span class="stat-title">Corrected Errors</span>
+                            <span class="stat-number" id="stats-corrected-count">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Charts Section -->
+                    <div class="charts-layout">
+                        <div class="card glass chart-card">
+                            <h3>Digit Frequency Distribution</h3>
+                            <div class="chart-container-inner">
+                                <canvas id="chart-distribution"></canvas>
                             </div>
-                            <div class="voice-console-body" id="voice-console-logs">
-                                <div class="console-line system">Assistant loaded. Say "What is the freshness of this banana?" or "Show nutrition for apple". Click the mic button to talk.</div>
+                        </div>
+                        <div class="card glass chart-card">
+                            <h3>Classification Accuracy Trend</h3>
+                            <div class="chart-container-inner">
+                                <canvas id="chart-history-trend"></canvas>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Right: Analysis Visualizer -->
-                    <div class="panel-column-right">
-                        <!-- Canvas Viewport -->
-                        <div class="glass-card panel-visualizer">
-                            <div class="card-header">
-                                <h3>Computer Vision Spatial Overlay</h3>
-                                <span class="badge green" id="visualizer-status">Awaiting Input</span>
-                            </div>
-                            <div class="visualizer-canvas-wrapper">
-                                <canvas id="analysis-canvas"></canvas>
-                                <div class="canvas-placeholder-overlay" id="canvas-placeholder">
-                                    <span class="placeholder-icon">📷</span>
-                                    <p>Select a sample image or upload a photo to execute OpenCV contour analysis</p>
-                                </div>
-                            </div>
-                            <!-- Detected items picker list -->
-                            <div class="detected-items-bar" id="detected-items-selector-bar" style="display: none;">
-                                <span>Detected Objects:</span>
-                                <div class="object-badge-list" id="detected-badge-container">
-                                    <!-- Populated dynamically -->
-                                </div>
+                    <!-- Predictions History Table -->
+                    <div class="card glass history-card">
+                        <div class="card-header-actions">
+                            <h3>Prediction Log & User Feedback</h3>
+                            <div class="history-actions">
+                                <button class="btn btn-secondary btn-sm" id="export-csv-btn">
+                                    <i class="fa-solid fa-file-csv"></i> Export CSV
+                                </button>
+                                <button class="btn btn-secondary btn-sm" id="print-report-btn">
+                                    <i class="fa-solid fa-file-pdf"></i> Print PDF Report
+                                </button>
+                                <button class="btn btn-danger btn-sm" id="clear-history-btn">
+                                    <i class="fa-solid fa-trash"></i> Reset Database
+                                </button>
                             </div>
                         </div>
-
-                        <!-- Details Grid -->
-                        <div class="analysis-details-grid" id="analysis-details-container" style="display: none;">
-                            <!-- Freshness & Ripeness Status -->
-                            <div class="glass-card card-freshness">
-                                <div class="card-header">
-                                    <h3>Freshness & Ripeness</h3>
-                                </div>
-                                <div class="gauge-meters-wrapper">
-                                    <div class="circular-gauge">
-                                        <svg viewBox="0 0 36 36" class="circular-chart">
-                                            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                                            <path id="freshness-gauge-path" class="circle green" stroke-dasharray="100, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                                            <text x="18" y="20.35" class="percentage" id="freshness-gauge-text">100%</text>
-                                        </svg>
-                                        <span class="gauge-label">Freshness Score</span>
-                                    </div>
-                                    <div class="ripeness-badge-wrapper">
-                                        <div class="badge-title">Ripeness State</div>
-                                        <div class="ripeness-value-pill" id="ripeness-state-pill">Ripe</div>
-                                        
-                                        <div class="badge-title">Quality Grade</div>
-                                        <div class="grade-value-pill" id="grade-state-pill">Grade A</div>
-                                    </div>
-                                </div>
-                                <div class="grade-reason-txt" id="grade-reason-text">No defects. Excellent shape.</div>
-                            </div>
-
-                            <!-- Diagnostic Info (Disease) -->
-                            <div class="glass-card card-disease" id="disease-warning-card" style="display: none;">
-                                <div class="card-header">
-                                    <h3 class="red-glow-txt">⚠️ Pathogen Diagnostic Alert</h3>
-                                </div>
-                                <div class="disease-details-body">
-                                    <div class="disease-primary-row">
-                                        <div class="disease-name" id="disease-name">Apple Scab</div>
-                                        <div class="badge red" id="disease-severity">Moderate Severity</div>
-                                    </div>
-                                    <div class="disease-meta"><strong>Pathogen:</strong> <span id="disease-pathogen">Venturia Inaequalis</span></div>
-                                    <p class="disease-desc" id="disease-description">Olive-black spots on apple skin.</p>
-                                    <div class="disease-prevention">
-                                        <strong>Prevention / Treat:</strong>
-                                        <p id="disease-prevention">Prune branches, remove fallen leaves.</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Advice Tab System (Recipes, Storage Hacks, Actions) -->
-                            <div class="glass-card card-advice">
-                                <div class="card-header" style="flex-direction: column; align-items: flex-start; gap: 10px;">
-                                    <h3>Actionable Advice & Recipes</h3>
-                                    <div class="tab-controls-advice" style="width: 100%;">
-                                        <button class="advice-tab active" id="btn-adv-action" onclick="switchAdviceTab('action')">Usage Guidelines</button>
-                                        <button class="advice-tab" id="btn-adv-recipe" onclick="switchAdviceTab('recipe')">Recipes</button>
-                                        <button class="advice-tab" id="btn-adv-storage" onclick="switchAdviceTab('storage')">Storage Hack</button>
-                                    </div>
-                                </div>
-                                <div class="advice-content-body">
-                                    <!-- Action Guide -->
-                                    <div class="advice-tab-pane active" id="pane-adv-action">
-                                        <div class="advice-pill-indicator green" id="action-indicator-badge">Suitable for Retail</div>
-                                        <p class="advice-main-desc" id="action-advice-text">Grade A Produce. Suitable for raw retail sales or processing.</p>
-                                    </div>
-                                    
-                                    <!-- Recipes -->
-                                    <div class="advice-tab-pane" id="pane-adv-recipe">
-                                        <div class="recipe-icon">🍳</div>
-                                        <div class="recipe-text-block">
-                                            <strong>Culinary Recommendations:</strong>
-                                            <p id="recipe-advice-text">Consume fresh as snack or cut into salads.</p>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Storage Tips -->
-                                    <div class="advice-tab-pane" id="pane-adv-storage">
-                                        <div class="storage-tip-block">
-                                            <strong>Preservation Guide:</strong>
-                                            <p id="storage-advice-text">Store in a cool dry drawer.</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Nutrition System -->
-                            <div class="glass-card card-nutrition">
-                                <div class="card-header">
-                                    <h3>Nutritional Profile</h3>
-                                    <span class="scientific-name" id="produce-scientific-name">Malus domestica</span>
-                                </div>
-                                <div class="nutrition-bars-list">
-                                    <div class="nutrition-item">
-                                        <div class="nutri-label"><span>Calories</span> <strong id="nutri-val-calories">52 kcal</strong></div>
-                                        <div class="bar-container"><div class="bar-fill purple" id="nutri-bar-calories" style="width: 52%;"></div></div>
-                                    </div>
-                                    <div class="nutrition-item">
-                                        <div class="nutri-label"><span>Carbohydrates</span> <strong id="nutri-val-carbs">13.8 g</strong></div>
-                                        <div class="bar-container"><div class="bar-fill yellow" id="nutri-bar-carbs" style="width: 14%;"></div></div>
-                                    </div>
-                                    <div class="nutrition-item">
-                                        <div class="nutri-label"><span>Dietary Fiber</span> <strong id="nutri-val-fiber">2.4 g</strong></div>
-                                        <div class="bar-container"><div class="bar-fill green" id="nutri-bar-fiber" style="width: 24%;"></div></div>
-                                    </div>
-                                    <div class="nutrition-item">
-                                        <div class="nutri-label"><span>Vitamin C</span> <strong id="nutri-val-vitc">14% DV</strong></div>
-                                        <div class="bar-container"><div class="bar-fill cyan" id="nutri-bar-vitc" style="width: 14%;"></div></div>
-                                    </div>
-                                    <div class="nutrition-item">
-                                        <div class="nutri-label"><span>Potassium</span> <strong id="nutri-val-potassium">107 mg</strong></div>
-                                        <div class="bar-container"><div class="bar-fill orange" id="nutri-bar-potassium" style="width: 10%;"></div></div>
-                                    </div>
-                                </div>
-                                <div class="weight-estimation-footer">
-                                    <strong>Estimated Weight:</strong> <span id="weight-estimate-txt">182g</span> (Calculated by CV Pixel Area)
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Action Controls (Add to Inventory) -->
-                        <div class="inventory-quick-actions" id="quick-actions-bar" style="display: none;">
-                            <button class="btn-primary" onclick="addSelectedItemToInventory()">Log to Smart Inventory</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- VIEW: SMART INVENTORY -->
-            <section id="view-inventory" class="content-view">
-                <div class="glass-card inventory-card">
-                    <div class="card-header inventory-header">
-                        <h2>Digital Inventory Ledger</h2>
-                        <div class="inventory-controls-row">
-                            <input type="text" id="inventory-search" placeholder="Search by name..." oninput="filterInventoryTable()">
-                            <select id="inventory-filter-freshness" onchange="filterInventoryTable()">
-                                <option value="">All Freshness levels</option>
-                                <option value="fresh">Fresh</option>
-                                <option value="semi-fresh">Semi-Fresh</option>
-                                <option value="rotten">Rotten</option>
-                            </select>
-                            <button class="btn-accent" onclick="exportInventoryToCSV()">📥 Export CSV</button>
-                            <button class="btn-danger" onclick="clearInventory()">🗑️ Clear List</button>
-                        </div>
-                    </div>
-                    
-                    <div class="inventory-layout-split">
-                        <!-- Left Table -->
-                        <div class="inventory-table-wrapper">
-                            <table class="inventory-table">
+                        <div class="table-container">
+                            <table class="history-table">
                                 <thead>
                                     <tr>
-                                        <th>ID</th>
-                                        <th>Date Logged</th>
-                                        <th>Name</th>
-                                        <th>Freshness</th>
-                                        <th>Grade</th>
-                                        <th>Estimated Weight</th>
-                                        <th>Days Left</th>
+                                        <th>Timestamp</th>
+                                        <th>Input Image</th>
+                                        <th>Model Class</th>
+                                        <th>Confidence</th>
+                                        <th>Clarity</th>
+                                        <th>User True Label</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody id="inventory-tbody">
+                                <tbody id="history-table-body">
+                                    <!-- Dynamic rows -->
                                     <tr>
-                                        <td colspan="8" class="empty-table-msg">Inventory is empty. Scan produce and click "Log to Smart Inventory" to track stock.</td>
+                                        <td colspan="7" class="empty-table-msg">No predictions logged yet. Draw digits and click 'Log to History'.</td>
                                     </tr>
                                 </tbody>
                             </table>
                         </div>
-
-                        <!-- Right QR Drawer -->
-                        <div class="qr-code-drawer" id="qr-drawer" style="display: none;">
-                            <div class="card-header">
-                                <h4>Supply Chain QR Generator</h4>
-                                <button class="close-btn" onclick="closeQRDrawer()">✕</button>
-                            </div>
-                            <div class="qr-drawer-body">
-                                <div id="qr-code-canvas-container">
-                                    <!-- QR Code drawn on canvas -->
-                                    <canvas id="qr-canvas" width="180" height="180"></canvas>
-                                </div>
-                                <h5 id="qr-item-name">Apple</h5>
-                                <div class="qr-details-list">
-                                    <div><strong>Batch UID:</strong> <span id="qr-uid">AG-12345</span></div>
-                                    <div><strong>Harvest Date:</strong> <span id="qr-date">2026-06-07</span></div>
-                                    <div><strong>Freshness:</strong> <span id="qr-freshness">Fresh (98%)</span></div>
-                                    <div><strong>Quality:</strong> <span id="qr-grade">Grade A</span></div>
-                                    <div><strong>Supplier:</strong> <span>Smart Farms Ltd.</span></div>
-                                </div>
-                                <button class="btn-primary" onclick="printQRCode()">Print Label</button>
-                            </div>
-                        </div>
                     </div>
-                </div>
-            </section>
+                </section>
 
-            <!-- VIEW: HARVEST GUIDE & ADVICE -->
-            <section id="view-harvest" class="content-view">
-                <div class="harvest-guide-grid">
-                    <!-- Storage Hack Guide -->
-                    <div class="glass-card guide-card">
-                        <div class="card-header">
-                            <h2>Ethylene & Storage Master Guide</h2>
-                        </div>
-                        <div class="guide-body">
-                            <div class="guide-row">
-                                <div class="guide-avatar">🍎</div>
-                                <div class="guide-text">
-                                    <strong>Apples (Ethylene Producers)</strong>
-                                    <p>Apples release a high volume of ethylene gas. Store them in a separate crisper drawer. Keep away from bananas, broccoli, and leafy greens to prevent premature yellowing.</p>
+                <!-- TAB 4: MODEL RETRAINING -->
+                <section class="tab-pane" id="pane-model-hub">
+                    <div class="retraining-layout">
+                        
+                        <!-- Left Panel: Tuning Setup -->
+                        <div class="card glass tuning-setup-card">
+                            <h3>Adaptive Fine-Tuning</h3>
+                            <p>Train the model dynamically on corrected predictions to customize predictions to your personal handwriting style.</p>
+                            
+                            <div class="dataset-stats">
+                                <div class="stat-row">
+                                    <span>Corrected Training Samples:</span>
+                                    <strong id="retrain-sample-count">0 samples</strong>
                                 </div>
-                            </div>
-                            <div class="guide-row">
-                                <div class="guide-avatar">🍌</div>
-                                <div class="guide-text">
-                                    <strong>Bananas (Ethylene Sensitive & Producers)</strong>
-                                    <p>Bananas release massive ethylene from their stems. Wrap the crown stems in plastic wrap to extend their life by 3-4 days. Store away from other items unless trying to speed up their ripening.</p>
+                                <div class="sample-bar-outer">
+                                    <div class="sample-bar-inner" id="retrain-sample-bar" style="width: 0%"></div>
                                 </div>
+                                <p class="help-text-small"><i class="fa-solid fa-circle-info"></i> Correct wrong predictions in the **Analytics Tab** or segments list to accumulate local retraining data.</p>
                             </div>
-                            <div class="guide-row">
-                                <div class="guide-avatar">🍅</div>
-                                <div class="guide-text">
-                                    <strong>Tomatoes (Flavor Preservation)</strong>
-                                    <p>Never refrigerate fresh tomatoes! Temperatures below 10°C break down flavor membranes and create a mealy texture. Store them stem-side down at room temperature.</p>
-                                </div>
-                            </div>
-                            <div class="guide-row">
-                                <div class="guide-avatar">🥔</div>
-                                <div class="guide-text">
-                                    <strong>Potatoes & Onions (Do Not Mix!)</strong>
-                                    <p>Storing potatoes and onions together is a common mistake. Onions emit moisture and gases that trigger rapid sprouting and decay in potatoes. Store in separate cool, dark, dry bins.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
 
-                    <!-- AI Harvest advisory -->
-                    <div class="glass-card guide-card">
-                        <div class="card-header">
-                            <h2>AI Harvest Timing Recommendations</h2>
+                            <hr class="divider">
+
+                            <h3>Hyperparameters</h3>
+                            <div class="hyperparams-form">
+                                <div class="form-group">
+                                    <label for="param-epochs">Epochs (Iterations):</label>
+                                    <input type="number" id="param-epochs" min="1" max="50" value="10">
+                                </div>
+                                <div class="form-group">
+                                    <label for="param-lr">Learning Rate:</label>
+                                    <select id="param-lr">
+                                        <option value="0.1">0.1 (Fast)</option>
+                                        <option value="0.01" selected>0.01 (Normal)</option>
+                                        <option value="0.001">0.001 (Slow / Precise)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="param-batch">Batch Size:</label>
+                                    <input type="number" id="param-batch" min="1" max="32" value="4">
+                                </div>
+                                <button class="btn btn-primary btn-block" id="start-retrain-btn" disabled>
+                                    <i class="fa-solid fa-microchip"></i> Start Online Training
+                                </button>
+                                <button class="btn btn-secondary btn-block" id="export-model-btn" style="margin-top: 8px;">
+                                    <i class="fa-solid fa-download"></i> Download Model Weights
+                                </button>
+                            </div>
                         </div>
-                        <div class="guide-body">
-                            <p>Based on our ripeness predictions, here are recommendations for farm inventory and harvesting schedules:</p>
-                            <div class="harvest-rec-box unripe">
-                                <h4>🟢 Stage 1: Unripe Produce</h4>
-                                <ul>
-                                    <li><strong>Action:</strong> Delay harvest. Monitor color index every 48 hours.</li>
-                                    <li><strong>Logistics:</strong> Ideal for long-distance export. Ripening can be triggered upon arrival using ethylene chambers.</li>
-                                </ul>
-                            </div>
-                            <div class="harvest-rec-box ripe">
-                                <h4>🟡 Stage 2: Ripe Produce</h4>
-                                <ul>
-                                    <li><strong>Action:</strong> HARVEST IMMEDIATELY. Pack into ventilated containers.</li>
-                                    <li><strong>Logistics:</strong> Retail-ready. Store in cold storage at 4°C (citrus/apples) or 13°C (bananas) to maximize shelf life.</li>
-                                </ul>
-                            </div>
-                            <div class="harvest-rec-box overripe">
-                                <h4>🔴 Stage 3: Overripe Produce</h4>
-                                <ul>
-                                    <li><strong>Action:</strong> Bypass standard retail channels. Route directly to food processing.</li>
-                                    <li><strong>Logistics:</strong> Process within 24 hours into sauces, dried fruits, purees, or bakery items to capture value.</li>
-                                </ul>
+
+                        <!-- Right Panel: Training Logger -->
+                        <div class="card glass training-log-card">
+                            <h3>Training Monitor</h3>
+                            <div class="training-body">
+                                <div class="training-metrics-row">
+                                    <div class="mini-stat">
+                                        <span class="lbl">Epoch</span>
+                                        <span class="val" id="train-current-epoch">0 / 0</span>
+                                    </div>
+                                    <div class="mini-stat">
+                                        <span class="lbl">Loss</span>
+                                        <span class="val" id="train-current-loss">0.0000</span>
+                                    </div>
+                                    <div class="mini-stat">
+                                        <span class="lbl">Validation Accuracy</span>
+                                        <span class="val" id="train-current-acc">0.0%</span>
+                                    </div>
+                                </div>
+
+                                <div class="training-charts">
+                                    <canvas id="chart-training-loss"></canvas>
+                                </div>
+
+                                <div class="console-logger" id="train-console-logs">
+                                    <span class="system-log">> Trainer engine idle. Awaiting data...</span>
+                                </div>
                             </div>
                         </div>
+
                     </div>
-                </div>
-            </section>
+                </section>
+
+                <!-- TAB 5: HELP / DOCUMENTATION -->
+                <section class="tab-pane" id="pane-help-guide">
+                    <div class="help-layout">
+                        
+                        <div class="card glass text-content-card">
+                            <h2>Project Architecture & Pipeline</h2>
+                            <p>This system integrates a complete Deep Learning deployment pipeline executing fully inside the browser sandbox using hardware-accelerated **TensorFlow.js**.</p>
+                            
+                            <div class="architecture-diagram-container">
+                                <div class="arch-box">
+                                    <div class="icon"><i class="fa-solid fa-signature"></i></div>
+                                    <h4>Canvas / Web Camera</h4>
+                                    <span>High-contrast drawing inputs</span>
+                                </div>
+                                <div class="arch-arrow"><i class="fa-solid fa-arrow-right"></i></div>
+                                <div class="arch-box">
+                                    <div class="icon"><i class="fa-solid fa-crop-simple"></i></div>
+                                    <h4>Preprocessing</h4>
+                                    <span>Segmentation & Centering</span>
+                                </div>
+                                <div class="arch-arrow"><i class="fa-solid fa-arrow-right"></i></div>
+                                <div class="arch-box">
+                                    <div class="icon"><i class="fa-solid fa-microchip"></i></div>
+                                    <h4>Inference Model</h4>
+                                    <span>Dense Network Classifier</span>
+                                </div>
+                                <div class="arch-arrow"><i class="fa-solid fa-arrow-right"></i></div>
+                                <div class="arch-box">
+                                    <div class="icon"><i class="fa-solid fa-chart-column"></i></div>
+                                    <h4>Saliency & Output</h4>
+                                    <span>XAI Heatmap & Speeches</span>
+                                </div>
+                            </div>
+
+                            <h3>1. Digital Preprocessing Pipeline (Crucial Step)</h3>
+                            <p>To match the mathematical distribution of the MNIST dataset, drawings drawn at 450x450px undergo these transformations:</p>
+                            <ul>
+                                <li>**Connected Component Analysis (CCA)**: Extracts bounding boxes around clusters of pixels, isolating distinct strokes.</li>
+                                <li>**Normalizing Size**: The isolated digit box is scaled to fit exactly within a 20x20 pixel bounding grid, preserving its original aspect ratio.</li>
+                                <li>**Centering**: The 20x20 box is embedded within a blank 28x28 grayscale canvas. Using the *center of mass* (centroid) of the active pixels, the model shifts the digit's coordinates so the centroid aligns perfectly at pixel `(14, 14)`. This centering eliminates translation variance.</li>
+                            </ul>
+
+                            <h3>2. Machine Learning Architecture</h3>
+                            <p>The core classifier uses a dense multinomial classifier layer trained on MNIST. Through the **Model Hub** tab, this model can be fine-tuned locally using browser IndexedDB storage and an adaptive learning loop.</p>
+                            
+                            <h3>3. Backpropagation-Based XAI (Saliency Map)</h3>
+                            <p>Explainability uses *gradient saliency*. By computing the Jacobian matrix of gradients of the predicted class score with respect to input pixels:
+                            $$\text{Saliency} = \left| \frac{\partial y_{\text{class}}}{\partial X_{\text{input}}} \right|$$
+                            The interface highlights the exact strokes and pixels that influenced the weights, letting users inspect what features (e.g. loops, endpoints) the model is looking at.</p>
+                        </div>
+
+                        <div class="card glass faq-card">
+                            <h2>Implementation FAQ</h2>
+                            
+                            <div class="faq-item">
+                                <h4>Why does the model sometimes misclassify digits?</h4>
+                                <p>Standard MNIST digits are centered and anti-aliased. If you write too quickly, draw multi-stroke detached digits, or make very thin strokes, the density distribution deviates from the training dataset. Try enabling the **Auto Center** setting or use thicker brushes.</p>
+                            </div>
+                            
+                            <div class="faq-item">
+                                <h4>How does the Mathematical Solver work?</h4>
+                                <p>In Equation Mode, our segmentation algorithm extracts individual components and sorts them left-to-right. It evaluates size/aspect-ratio metrics: items that are extremely wide and thin are classified as minus `-`, items with intersection points are classified as plus `+`, etc. The remaining are predicted as digits, and JavaScript evaluates the equation.</p>
+                            </div>
+
+                            <div class="faq-item">
+                                <h4>Where is my history saved?</h4>
+                                <p>All user authentication profiles, settings, and prediction history are stored inside your browser's local sandbox via `localStorage`. Clearing the browser history or clicking 'Reset Database' clears this information.</p>
+                            </div>
+                        </div>
+
+                    </div>
+                </section>
+
+            </div>
         </main>
     </div>
 
-    <!-- Scripts -->
-    <script src="api.js"></script>
-    <script src="voice.js"></script>
+    <!-- Modal for profile creation -->
+    <div class="modal-backdrop" id="profile-modal" style="display:none;">
+        <div class="modal card glass">
+            <h3>Create User Profile</h3>
+            <div class="form-group">
+                <label for="new-profile-name">Full Name:</label>
+                <input type="text" id="new-profile-name" placeholder="John Doe">
+            </div>
+            <div class="form-group">
+                <label for="new-profile-role">Handwriting Profile Tag:</label>
+                <select id="new-profile-role">
+                    <option value="Left-Handed">Left-Handed Writer</option>
+                    <option value="Right-Handed" selected>Right-Handed Writer</option>
+                    <option value="Child Stylus">Child Drawing / Stylus</option>
+                    <option value="High-Speed Writer">High-Speed Script</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
+                <button class="btn btn-primary" id="modal-submit-btn">Save Profile</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main JS Application Code -->
+    <script src="model.js"></script>
     <script src="app.js"></script>
-
-<!-- AgroScan AI Voice Greeting -->
-<script>
-(function() {
-    var greetingDone = false;
-    var activeUtterances = []; // Prevent Garbage Collection
-    var textToSpeak = 'Hi Kiran, how are you? I am AgroScan AI, your fresh produce quality grading assistant. I can help you detect multiple fruits and vegetables simultaneously, grade their quality, estimate ripeness, assess shelf-life, and identify surface blemishes using computer vision. My main advantages include multi-object real-time tracking, detailed nutritional and recipe recommendations based on freshness, and hands-free voice operations. Let us get started!';
-    
-    function speakGreeting() {
-        if (greetingDone) return;
-        
-        if (!window.speechSynthesis) {
-            greetingDone = true;
-            return;
-        }
-
-        try {
-            if (window.speechSynthesis.paused) {
-                window.speechSynthesis.resume();
-            }
-            window.speechSynthesis.cancel();
-        } catch(e) {
-            console.error("Speech reset failed:", e);
-        }
-
-        var msg = new SpeechSynthesisUtterance(textToSpeak);
-
-        // Try to find a nice English voice
-        var voices = window.speechSynthesis.getVoices();
-        if (voices && voices.length > 0) {
-            var preferredVoice = voices.find(function(v) {
-                return v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Zira') || v.name.includes('David'));
-            }) || voices.find(function(v) {
-                return v.lang.startsWith('en');
-            });
-            if (preferredVoice) {
-                msg.voice = preferredVoice;
-            }
-        }
-
-        msg.rate = 0.95;
-        msg.pitch = 1.05;
-        msg.volume = 1;
-
-        msg.onstart = function() {
-            greetingDone = true;
-            sessionStorage.setItem('agroScanVoiceGreetingPlayed', 'true');
-            cleanupListeners();
-        };
-
-        msg.onend = function() {
-            activeUtterances = [];
-        };
-
-        msg.onerror = function(e) {
-            console.error("Speech synthesis error:", e);
-            if (e.error === 'not-allowed') {
-                greetingDone = false;
-            } else {
-                greetingDone = true;
-                cleanupListeners();
-            }
-            activeUtterances = [];
-        };
-
-        activeUtterances.push(msg);
-        window.activeUtterancesList = activeUtterances;
-
-        window.speechSynthesis.speak(msg);
-    }
-
-    function cleanupListeners() {
-        document.removeEventListener('click', triggerSpeech);
-        document.removeEventListener('keydown', triggerSpeech);
-        document.removeEventListener('touchstart', triggerSpeech);
-    }
-
-    function triggerSpeech() {
-        speakGreeting();
-    }
-
-    function initGreeting() {
-        if (sessionStorage.getItem('agroScanVoiceGreetingPlayed')) {
-            greetingDone = true;
-            return;
-        }
-
-        // 1. Attempt to speak automatically on load
-        speakGreeting();
-
-        // 2. Register fallback triggers for user activation
-        document.addEventListener('click', triggerSpeech);
-        document.addEventListener('keydown', triggerSpeech);
-        document.addEventListener('touchstart', triggerSpeech);
-
-        // Re-check voices when loaded dynamically
-        if (window.speechSynthesis.onvoiceschanged !== undefined) {
-            window.speechSynthesis.onvoiceschanged = function() {
-                window.speechSynthesis.getVoices();
-                if (!greetingDone) {
-                    speakGreeting();
-                }
-            };
-        }
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initGreeting);
-    } else {
-        initGreeting();
-    }
-})();
-</script>
 </body>
 </html>

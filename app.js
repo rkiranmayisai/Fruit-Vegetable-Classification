@@ -99,9 +99,6 @@ function initApp() {
         });
     }
 
-    );
-    }
-
     // 5. Setup Canvas Click Listeners (Interactive selection)
     const canvas = document.getElementById("analysis-canvas");
     if (canvas) {

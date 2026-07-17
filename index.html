@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AGROSCAN - AI Produce Classifier & Freshness Detector</title>
+    <meta name="description" content="AI-driven agricultural quality grading, freshness detection, disease diagnostics, and inventory management platform.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="app-sidebar">
+            <div class="sidebar-logo">
+                <span class="logo-icon">🌱</span>
+                <h2>AGRO<span class="logo-accent">SCAN</span></h2>
+            </div>
+            <nav class="sidebar-menu">
+                <button class="menu-item active" id="tab-dashboard" onclick="switchView('dashboard')">
+                    <span class="menu-icon">📊</span> Dashboard
+                </button>
+                <button class="menu-item" id="tab-inventory" onclick="switchView('inventory')">
+                    <span class="menu-icon">📦</span> Smart Inventory
+                </button>
+                <button class="menu-item" id="tab-harvest" onclick="switchView('harvest')">
+                    <span class="menu-icon">🌾</span> Harvest & Storage Guide
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sys-status">
+                    <span class="status-dot green"></span>
+                    <span class="status-text">CV Pipeline Online</span>
+                </div>
+                <div class="sys-version">v1.1.2 (Py3.14 + CV2)</div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="app-content">
+            <!-- Header bar -->
+            <header class="app-header">
+                <div class="header-search">
+                    <h1>Agricultural Quality Assessment & Diagnostics</h1>
+                </div>
+                
+                
+                <div class="stat-card">
+                    <div class="stat-icon green">🥗</div>
+                    <div class="stat-details">
+                        <span class="stat-label">Average Freshness</span>
+                        <h3 class="stat-value" id="stats-avg-freshness">0%</h3>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon orange">🏆</div>
+                    <div class="stat-details">
+                        <span class="stat-label">Grade A Produce</span>
+                        <h3 class="stat-value" id="stats-grade-a">0%</h3>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon red">⚠️</div>
+                    <div class="stat-details">
+                        <span class="stat-label">Alerts (Decay/Disease)</span>
+                        <h3 class="stat-value" id="stats-alerts">0</h3>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW: DASHBOARD -->
+            <section id="view-dashboard" class="content-view active">
+                <div class="dashboard-grid">
+                    <!-- Left: Control Panels (Input sources) -->
+                    <div class="panel-column-left">
+                        <!-- Input Sources Card -->
+                        <div class="glass-card panel-input">
+                            <div class="card-header">
+                                <h3>Produce Input Stream</h3>
+                                <div class="tab-controls">
+                                    <button class="tab-btn active" id="btn-tab-upload" onclick="switchInputMode('upload')">File Upload</button>
+                                    <button class="tab-btn" id="btn-tab-webcam" onclick="switchInputMode('webcam')">Live Webcam</button>
+                                </div>
+                            </div>
+                            
+                            <!-- File Upload Tab -->
+                            <div class="input-tab-content active" id="input-upload-container">
+                                <div class="drag-drop-area" id="drop-zone">
+                                    <div class="drag-drop-inner">
+                                        <span class="upload-large-icon">📤</span>
+                                        <p>Drag and drop image here or <strong>browse files</strong></p>
+                                        <span class="file-limits">Supports JPG, PNG, JPEG (Max 8MB)</span>
+                                        <input type="file" id="file-input" accept="image/*" style="display: none;">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Webcam Tab -->
+                            <div class="input-tab-content" id="input-webcam-container">
+                                <div class="webcam-viewport-wrapper">
+                                    <video id="webcam-video" autoplay playsinline></video>
+                                    <canvas id="webcam-capture-canvas" style="display: none;"></canvas>
+                                    <div class="webcam-controls">
+                                        <button class="btn-primary" id="btn-webcam-toggle" onclick="toggleWebcam()">Start Camera</button>
+                                        <button class="btn-accent" id="btn-webcam-capture" onclick="captureWebcamFrame()" disabled>Capture Image</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Demo Samples Row -->
+                            <div class="demo-samples-wrapper">
+                                <h4>Or test with demo sample images:</h4>
+                                <div class="demo-samples-list" id="samples-list-container">
+                                    <!-- Populated dynamically via JS -->
+                                    <div class="demo-sample-loading">Loading demo samples...</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        
+                        </div>
+                    </div>
+
+                    <!-- Right: Analysis Visualizer -->
+                    <div class="panel-column-right">
+                        <!-- Canvas Viewport -->
+                        <div class="glass-card panel-visualizer">
+                            <div class="card-header">
+                                <h3>Computer Vision Spatial Overlay</h3>
+                                <span class="badge green" id="visualizer-status">Awaiting Input</span>
+                            </div>
+                            <div class="visualizer-canvas-wrapper">
+                                <canvas id="analysis-canvas"></canvas>
+                                <div class="canvas-placeholder-overlay" id="canvas-placeholder">
+                                    <span class="placeholder-icon">📷</span>
+                                    <p>Select a sample image or upload a photo to execute OpenCV contour analysis</p>
+                                </div>
+                            </div>
+                            <!-- Detected items picker list -->
+                            <div class="detected-items-bar" id="detected-items-selector-bar" style="display: none;">
+                                <span>Detected Objects:</span>
+                                <div class="object-badge-list" id="detected-badge-container">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Details Grid -->
+                        <div class="analysis-details-grid" id="analysis-details-container" style="display: none;">
+                            <!-- Freshness & Ripeness Status -->
+                            <div class="glass-card card-freshness">
+                                <div class="card-header">
+                                    <h3>Freshness & Ripeness</h3>
+                                </div>
+                                <div class="gauge-meters-wrapper">
+                                    <div class="circular-gauge">
+                                        <svg viewBox="0 0 36 36" class="circular-chart">
+                                            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                            <path id="freshness-gauge-path" class="circle green" stroke-dasharray="100, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                            <text x="18" y="20.35" class="percentage" id="freshness-gauge-text">100%</text>
+                                        </svg>
+                                        <span class="gauge-label">Freshness Score</span>
+                                    </div>
+                                    <div class="ripeness-badge-wrapper">
+                                        <div class="badge-title">Ripeness State</div>
+                                        <div class="ripeness-value-pill" id="ripeness-state-pill">Ripe</div>
+                                        
+                                        <div class="badge-title">Quality Grade</div>
+                                        <div class="grade-value-pill" id="grade-state-pill">Grade A</div>
+                                    </div>
+                                </div>
+                                <div class="grade-reason-txt" id="grade-reason-text">No defects. Excellent shape.</div>
+                            </div>
+
+                            <!-- Diagnostic Info (Disease) -->
+                            <div class="glass-card card-disease" id="disease-warning-card" style="display: none;">
+                                <div class="card-header">
+                                    <h3 class="red-glow-txt">⚠️ Pathogen Diagnostic Alert</h3>
+                                </div>
+                                <div class="disease-details-body">
+                                    <div class="disease-primary-row">
+                                        <div class="disease-name" id="disease-name">Apple Scab</div>
+                                        <div class="badge red" id="disease-severity">Moderate Severity</div>
+                                    </div>
+                                    <div class="disease-meta"><strong>Pathogen:</strong> <span id="disease-pathogen">Venturia Inaequalis</span></div>
+                                    <p class="disease-desc" id="disease-description">Olive-black spots on apple skin.</p>
+                                    <div class="disease-prevention">
+                                        <strong>Prevention / Treat:</strong>
+                                        <p id="disease-prevention">Prune branches, remove fallen leaves.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Advice Tab System (Recipes, Storage Hacks, Actions) -->
+                            <div class="glass-card card-advice">
+                                <div class="card-header" style="flex-direction: column; align-items: flex-start; gap: 10px;">
+                                    <h3>Actionable Advice & Recipes</h3>
+                                    <div class="tab-controls-advice" style="width: 100%;">
+                                        <button class="advice-tab active" id="btn-adv-action" onclick="switchAdviceTab('action')">Usage Guidelines</button>
+                                        <button class="advice-tab" id="btn-adv-recipe" onclick="switchAdviceTab('recipe')">Recipes</button>
+                                        <button class="advice-tab" id="btn-adv-storage" onclick="switchAdviceTab('storage')">Storage Hack</button>
+                                    </div>
+                                </div>
+                                <div class="advice-content-body">
+                                    <!-- Action Guide -->
+                                    <div class="advice-tab-pane active" id="pane-adv-action">
+                                        <div class="advice-pill-indicator green" id="action-indicator-badge">Suitable for Retail</div>
+                                        <p class="advice-main-desc" id="action-advice-text">Grade A Produce. Suitable for raw retail sales or processing.</p>
+                                    </div>
+                                    
+                                    <!-- Recipes -->
+                                    <div class="advice-tab-pane" id="pane-adv-recipe">
+                                        <div class="recipe-icon">🍳</div>
+                                        <div class="recipe-text-block">
+                                            <strong>Culinary Recommendations:</strong>
+                                            <p id="recipe-advice-text">Consume fresh as snack or cut into salads.</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Storage Tips -->
+                                    <div class="advice-tab-pane" id="pane-adv-storage">
+                                        <div class="storage-tip-block">
+                                            <strong>Preservation Guide:</strong>
+                                            <p id="storage-advice-text">Store in a cool dry drawer.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Nutrition System -->
+                            <div class="glass-card card-nutrition">
+                                <div class="card-header">
+                                    <h3>Nutritional Profile</h3>
+                                    <span class="scientific-name" id="produce-scientific-name">Malus domestica</span>
+                                </div>
+                                <div class="nutrition-bars-list">
+                                    <div class="nutrition-item">
+                                        <div class="nutri-label"><span>Calories</span> <strong id="nutri-val-calories">52 kcal</strong></div>
+                                        <div class="bar-container"><div class="bar-fill purple" id="nutri-bar-calories" style="width: 52%;"></div></div>
+                                    </div>
+                                    <div class="nutrition-item">
+                                        <div class="nutri-label"><span>Carbohydrates</span> <strong id="nutri-val-carbs">13.8 g</strong></div>
+                                        <div class="bar-container"><div class="bar-fill yellow" id="nutri-bar-carbs" style="width: 14%;"></div></div>
+                                    </div>
+                                    <div class="nutrition-item">
+                                        <div class="nutri-label"><span>Dietary Fiber</span> <strong id="nutri-val-fiber">2.4 g</strong></div>
+                                        <div class="bar-container"><div class="bar-fill green" id="nutri-bar-fiber" style="width: 24%;"></div></div>
+                                    </div>
+                                    <div class="nutrition-item">
+                                        <div class="nutri-label"><span>Vitamin C</span> <strong id="nutri-val-vitc">14% DV</strong></div>
+                                        <div class="bar-container"><div class="bar-fill cyan" id="nutri-bar-vitc" style="width: 14%;"></div></div>
+                                    </div>
+                                    <div class="nutrition-item">
+                                        <div class="nutri-label"><span>Potassium</span> <strong id="nutri-val-potassium">107 mg</strong></div>
+                                        <div class="bar-container"><div class="bar-fill orange" id="nutri-bar-potassium" style="width: 10%;"></div></div>
+                                    </div>
+                                </div>
+                                <div class="weight-estimation-footer">
+                                    <strong>Estimated Weight:</strong> <span id="weight-estimate-txt">182g</span> (Calculated by CV Pixel Area)
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Action Controls (Add to Inventory) -->
+                        <div class="inventory-quick-actions" id="quick-actions-bar" style="display: none;">
+                            <button class="btn-primary" onclick="addSelectedItemToInventory()">Log to Smart Inventory</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW: SMART INVENTORY -->
+            <section id="view-inventory" class="content-view">
+                <div class="glass-card inventory-card">
+                    <div class="card-header inventory-header">
+                        <h2>Digital Inventory Ledger</h2>
+                        <div class="inventory-controls-row">
+                            <input type="text" id="inventory-search" placeholder="Search by name..." oninput="filterInventoryTable()">
+                            <select id="inventory-filter-freshness" onchange="filterInventoryTable()">
+                                <option value="">All Freshness levels</option>
+                                <option value="fresh">Fresh</option>
+                                <option value="semi-fresh">Semi-Fresh</option>
+                                <option value="rotten">Rotten</option>
+                            </select>
+                            <button class="btn-accent" onclick="exportInventoryToCSV()">📥 Export CSV</button>
+                            <button class="btn-danger" onclick="clearInventory()">🗑️ Clear List</button>
+                        </div>
+                    </div>
+                    
+                    <div class="inventory-layout-split">
+                        <!-- Left Table -->
+                        <div class="inventory-table-wrapper">
+                            <table class="inventory-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Date Logged</th>
+                                        <th>Name</th>
+                                        <th>Freshness</th>
+                                        <th>Grade</th>
+                                        <th>Estimated Weight</th>
+                                        <th>Days Left</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inventory-tbody">
+                                    <tr>
+                                        <td colspan="8" class="empty-table-msg">Inventory is empty. Scan produce and click "Log to Smart Inventory" to track stock.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Right QR Drawer -->
+                        <div class="qr-code-drawer" id="qr-drawer" style="display: none;">
+                            <div class="card-header">
+                                <h4>Supply Chain QR Generator</h4>
+                                <button class="close-btn" onclick="closeQRDrawer()">✕</button>
+                            </div>
+                            <div class="qr-drawer-body">
+                                <div id="qr-code-canvas-container">
+                                    <!-- QR Code drawn on canvas -->
+                                    <canvas id="qr-canvas" width="180" height="180"></canvas>
+                                </div>
+                                <h5 id="qr-item-name">Apple</h5>
+                                <div class="qr-details-list">
+                                    <div><strong>Batch UID:</strong> <span id="qr-uid">AG-12345</span></div>
+                                    <div><strong>Harvest Date:</strong> <span id="qr-date">2026-06-07</span></div>
+                                    <div><strong>Freshness:</strong> <span id="qr-freshness">Fresh (98%)</span></div>
+                                    <div><strong>Quality:</strong> <span id="qr-grade">Grade A</span></div>
+                                    <div><strong>Supplier:</strong> <span>Smart Farms Ltd.</span></div>
+                                </div>
+                                <button class="btn-primary" onclick="printQRCode()">Print Label</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW: HARVEST GUIDE & ADVICE -->
+            <section id="view-harvest" class="content-view">
+                <div class="harvest-guide-grid">
+                    <!-- Storage Hack Guide -->
+                    <div class="glass-card guide-card">
+                        <div class="card-header">
+                            <h2>Ethylene & Storage Master Guide</h2>
+                        </div>
+                        <div class="guide-body">
+                            <div class="guide-row">
+                                <div class="guide-avatar">🍎</div>
+                                <div class="guide-text">
+                                    <strong>Apples (Ethylene Producers)</strong>
+                                    <p>Apples release a high volume of ethylene gas. Store them in a separate crisper drawer. Keep away from bananas, broccoli, and leafy greens to prevent premature yellowing.</p>
+                                </div>
+                            </div>
+                            <div class="guide-row">
+                                <div class="guide-avatar">🍌</div>
+                                <div class="guide-text">
+                                    <strong>Bananas (Ethylene Sensitive & Producers)</strong>
+                                    <p>Bananas release massive ethylene from their stems. Wrap the crown stems in plastic wrap to extend their life by 3-4 days. Store away from other items unless trying to speed up their ripening.</p>
+                                </div>
+                            </div>
+                            <div class="guide-row">
+                                <div class="guide-avatar">🍅</div>
+                                <div class="guide-text">
+                                    <strong>Tomatoes (Flavor Preservation)</strong>
+                                    <p>Never refrigerate fresh tomatoes! Temperatures below 10°C break down flavor membranes and create a mealy texture. Store them stem-side down at room temperature.</p>
+                                </div>
+                            </div>
+                            <div class="guide-row">
+                                <div class="guide-avatar">🥔</div>
+                                <div class="guide-text">
+                                    <strong>Potatoes & Onions (Do Not Mix!)</strong>
+                                    <p>Storing potatoes and onions together is a common mistake. Onions emit moisture and gases that trigger rapid sprouting and decay in potatoes. Store in separate cool, dark, dry bins.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Harvest advisory -->
+                    <div class="glass-card guide-card">
+                        <div class="card-header">
+                            <h2>AI Harvest Timing Recommendations</h2>
+                        </div>
+                        <div class="guide-body">
+                            <p>Based on our ripeness predictions, here are recommendations for farm inventory and harvesting schedules:</p>
+                            <div class="harvest-rec-box unripe">
+                                <h4>🟢 Stage 1: Unripe Produce</h4>
+                                <ul>
+                                    <li><strong>Action:</strong> Delay harvest. Monitor color index every 48 hours.</li>
+                                    <li><strong>Logistics:</strong> Ideal for long-distance export. Ripening can be triggered upon arrival using ethylene chambers.</li>
+                                </ul>
+                            </div>
+                            <div class="harvest-rec-box ripe">
+                                <h4>🟡 Stage 2: Ripe Produce</h4>
+                                <ul>
+                                    <li><strong>Action:</strong> HARVEST IMMEDIATELY. Pack into ventilated containers.</li>
+                                    <li><strong>Logistics:</strong> Retail-ready. Store in cold storage at 4°C (citrus/apples) or 13°C (bananas) to maximize shelf life.</li>
+                                </ul>
+                            </div>
+                            <div class="harvest-rec-box overripe">
+                                <h4>🔴 Stage 3: Overripe Produce</h4>
+                                <ul>
+                                    <li><strong>Action:</strong> Bypass standard retail channels. Route directly to food processing.</li>
+                                    <li><strong>Logistics:</strong> Process within 24 hours into sauces, dried fruits, purees, or bakery items to capture value.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="api.js"></script>
+    <script src="app.js"></script>
+
+    
+</body>
+</html>
+

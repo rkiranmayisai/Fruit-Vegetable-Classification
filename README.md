@@ -52,14 +52,22 @@ This project features a fully integrated **AI Farming Assistant** that greets yo
 
 ## 🛠️ Technology Stack
 
+* **Backend API**:
+  * [FastAPI](https://fastapi.tiangolo.com/) (High-performance web server & endpoint routers)
+  * [Uvicorn](https://www.uvicorn.org/) (Asynchronous server gateway interface)
+  * [OpenCV (opencv-python)](https://opencv.org/) (Computer vision contour analysis, color masking, and image processing)
+  * [NumPy](https://numpy.org/) & [Pillow](https://python-pillow.org/) (Array computation and image parsing)
 * **Frontend Interface**:
   * Semantic HTML5 & Responsive CSS3 (Glassmorphism layout, Outfit & Space Grotesk fonts, HSL variable palettes, and fade-in animations)
-  * Vanilla ES6+ JavaScript (API integration, canvas rendering, SVG progress gauges, and embedded Base64 image loaders)
+  * Vanilla ES6+ JavaScript (API integration, canvas rendering, SVG progress gauges)
   * [Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API) (Speech synthesis greeting engine and speech recognition voice assistant)
 
 ---
 
 ## 🚀 Getting Started
+
+### Prerequisites
+Make sure you have Python 3.8+ installed on your system.
 
 ### 1. Clone the Repository
 ```bash
@@ -67,10 +75,24 @@ git clone https://github.com/your-username/fruit-vegetable-classification.git
 cd fruit-vegetable-classification
 ```
 
-### 2. Run the Application
-Open `index.html` directly in your web browser, or serve it using a lightweight local web server:
-* **Python**: `python -m http.server 8000`
-* **Node.js**: `npx serve`
+### 2. Install Dependencies
+Install the required packages using pip:
+```bash
+pip install fastapi uvicorn opencv-python numpy pillow
+```
+
+### 3. Run the Server
+Launch the server using the entrypoint script:
+```bash
+python run.py
+```
+This script will:
+* Verify all python package dependencies are present.
+* Generate default demo sample images (in the `samples/` folder) if they are missing.
+* Initialize the Uvicorn web server at `http://127.0.0.1:8000`.
+
+### 4. Open the App
+Navigate to **`http://127.0.0.1:8000`** in your browser.
 
 ---
 
@@ -78,13 +100,23 @@ Open `index.html` directly in your web browser, or serve it using a lightweight 
 
 ```
 Fruit & Vegetable Classification/
-├── samples/           # Input samples (fresh_apple.jpg, spotted_banana.jpg, etc.)
-├── api.js             # API communication logic & embedded Base64 fallback datasets
-├── app.js             # Main controller (view switching, canvas overlay drawing, gauges, inventory ledger)
-├── voice.js           # Interactive Speech-to-text voice assistant module
-├── styles.css         # Modern glassmorphic styling and UI responsiveness rules
-├── index.html         # Main app dashboard layout, ledger templates, and storage guides
-└── README.md          # Project documentation
+├── backend/
+│   ├── __init__.py
+│   ├── analyzer.py            # OpenCV computer vision color masks & contour calculations
+│   ├── app.py                 # FastAPI endpoints (/api/health, /api/samples, /api/analyze)
+│   ├── data.py                # Produce metadata database (nutrition, storage, recipes, actions)
+│   └── generate_samples.py    # Auto-generation helper for demo images
+├── frontend/
+│   ├── css/
+│   │   └── styles.css         # Modern glassmorphism UI & responsive styling
+│   ├── js/
+│   │   ├── api.js             # API communications & network calls
+│   │   ├── app.js             # View switching, canvas overlay drawing, circular gauges, inventory
+│   │   └── voice.js           # Speech-to-text recognition handler
+│   └── index.html             # Main dashboard, inventory table, and harvest guides
+├── samples/                   # Input samples (fresh_apple.jpg, spotted_banana.jpg, etc.)
+├── run.py                     # Entry point script (starts FastAPI + generates assets)
+└── README.md                  # Project documentation
 ```
 
 ---
